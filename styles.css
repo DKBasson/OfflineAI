@@ -90,16 +90,16 @@ body {
 #history-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
 
 .history-item {
-  padding: 10px 12px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 8px 10px 12px;
   border-radius: var(--r-sm);
-  cursor: pointer;
   transition: background .15s;
   margin-bottom: 2px;
   border: 1px solid transparent;
 }
 .history-item:hover { background: var(--glass-md); border-color: var(--border); }
 .history-item.active { background: var(--accent-lo); border-color: var(--accent-b); }
-
+.history-item-main { flex: 1; min-width: 0; cursor: pointer; }
 .history-title {
   font-size: 13px; font-weight: 500; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -109,6 +109,16 @@ body {
   font-size: 11px; color: var(--text-3);
   display: flex; gap: 8px;
 }
+.history-del-btn {
+  flex-shrink: 0; opacity: 0;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: transparent; border: 1px solid transparent;
+  color: var(--text-3); font-size: 11px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: opacity .15s, background .15s, color .15s;
+}
+.history-item:hover .history-del-btn { opacity: 1; }
+.history-del-btn:hover { background: var(--glass-hi); border-color: var(--border-hi); color: var(--text); }
 
 .sidebar-new-btn {
   margin: 10px;

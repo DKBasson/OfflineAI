@@ -440,12 +440,22 @@
       const div = document.createElement('div');
       div.className = 'history-item' + (item.id === currentConvId ? ' active' : '');
       div.innerHTML = `
-        <div class="history-title">${escHtml(item.title)}</div>
-        <div class="history-meta">
-          <span>${escHtml(formatDate(item.timestamp))}</span>
-          <span>${escHtml(item.model)}</span>
-        </div>`;
-      div.addEventListener('click', () => loadConversation(item));
+        <div class="history-item-main">
+          <div class="history-title">${escHtml(item.title)}</div>
+          <div class="history-meta">
+            <span>${escHtml(formatDate(item.timestamp))}</span>
+            <span>${escHtml(item.model)}</span>
+          </div>
+        </div>
+        <button class="history-del-btn" title="Delete conversation" aria-label="Delete">✕</button>`;
+      div.querySelector('.history-item-main').addEventListener('click', () => loadConversation(item));
+      div.querySelector('.history-del-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        const h = getHistory().filter(x => x.id !== item.id);
+        try { localStorage.setItem('offlineai_history', JSON.stringify(h)); } catch {}
+        if (currentConvId === item.id) { startNewChat(); closeSidebar(); return; }
+        renderHistoryList();
+      });
       historyList.appendChild(div);
     }
   }
