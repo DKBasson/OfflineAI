@@ -13,6 +13,34 @@
 <body>
 
   <div id="sidebar-overlay"></div>
+  <div id="settings-overlay"></div>
+
+  <div id="settings-panel">
+    <div class="settings-header">
+      <span class="settings-title">Settings</span>
+      <button class="sidebar-close" id="settings-close-btn">✕</button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-group">
+        <label class="settings-label">Your name</label>
+        <input class="settings-input" id="settings-name" type="text" placeholder="Enter your name…" maxlength="32">
+      </div>
+      <div class="settings-group">
+        <label class="settings-label">Model</label>
+        <span class="settings-hint">Fetched from Ollama — run <code>ollama pull &lt;name&gt;</code> to add models</span>
+        <select class="settings-select" id="settings-model"></select>
+      </div>
+      <div class="settings-group">
+        <label class="settings-label">Context window</label>
+        <span class="settings-hint">Max messages sent per request (4–100)</span>
+        <input class="settings-input" id="settings-context" type="number" min="4" max="100" step="1">
+      </div>
+      <div class="settings-group settings-group--danger">
+        <button class="settings-danger-btn" id="clear-history-btn">Clear all history</button>
+      </div>
+    </div>
+    <button class="settings-save-btn" id="settings-save-btn">Save settings</button>
+  </div>
 
   <div id="sidebar">
     <div class="sidebar-header">
@@ -35,6 +63,12 @@
       <div class="brand-dot"></div>
       OfflineAI
     </div>
+    <button class="hdr-icon-btn" id="settings-btn" title="Settings">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
     <button class="hdr-icon-btn" id="clear-btn" title="New chat">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -45,6 +79,15 @@
   <main id="messages"></main>
 
   <footer>
+    <div id="system-prompt-section">
+      <button id="sp-toggle" class="sp-toggle">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        System prompt
+      </button>
+      <div id="sp-body" class="sp-body">
+        <textarea id="system-prompt-input" class="sp-textarea" placeholder="Optional instructions for this conversation… e.g. 'Reply in French' or 'Act as a code reviewer'" rows="3"></textarea>
+      </div>
+    </div>
     <div id="img-previews"></div>
     <div class="input-wrap">
       <textarea id="input" placeholder="Message…" rows="1"></textarea>
@@ -81,47 +124,97 @@
     <img id="lightbox-img" src="" alt="">
   </div>
 
+  <div id="name-modal" class="hidden">
+    <div class="name-card">
+      <div class="welcome-glyph">⚡</div>
+      <h2>Welcome to OfflineAI</h2>
+      <p>Your conversations stay on this device.<br>What should I call you?</p>
+      <input id="name-modal-input" type="text" class="name-input" placeholder="Your name…" maxlength="32" autocomplete="off">
+      <button id="name-modal-btn" class="name-btn">Get Started →</button>
+    </div>
+  </div>
+
 <script>
-  // ── Config ────────────────────────────────────────────
-  const DEFAULT_MODEL = 'gemma4:e4b';
-  const MAX_HISTORY   = 60;
-  const MAX_CONTEXT   = 20; // max messages sent per request (prevents context-window overflow)
+  // ── Config / Defaults ─────────────────────────────────
+  const FALLBACK_MODEL = 'gemma4:e4b';
+  const SETTINGS_KEY   = 'offlineai_settings';
+  const MAX_HISTORY    = 60;
 
   // Configure marked once at startup
   marked.use({ breaks: true, gfm: true });
 
+  // ── Settings ──────────────────────────────────────────
+  function getSettings() {
+    try {
+      return { model: FALLBACK_MODEL, contextSize: 20, username: '',
+               ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
+    } catch { return { model: FALLBACK_MODEL, contextSize: 20, username: '' }; }
+  }
+  function persistSettings(s) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
+  }
+
+  // ── Active config (loaded from settings at init) ──────
+  let activeModel       = FALLBACK_MODEL;
+  let activeContextSize = 20;
+  let activeUsername    = '';
+
   // ── State ─────────────────────────────────────────────
-  let messages      = [];
-  let pendingImages = [];
-  let isStreaming   = false;
-  let abortCtrl     = null;
-  let streamEl      = null;
-  let streamText    = '';
-  let currentConvId = null;
+  let messages            = [];
+  let pendingImages       = [];
+  let isStreaming         = false;
+  let abortCtrl           = null;
+  let streamEl            = null;
+  let streamText          = '';
+  let currentConvId       = null;
+  let currentSystemPrompt = '';
 
   // ── DOM ───────────────────────────────────────────────
-  const messagesEl   = document.getElementById('messages');
-  const inputEl      = document.getElementById('input');
-  const sendBtn      = document.getElementById('send-btn');
-  const stopBtn      = document.getElementById('stop-btn');
-  const attachBtn    = document.getElementById('attach-btn');
-  const fileInput    = document.getElementById('file-input');
-  const previewsEl   = document.getElementById('img-previews');
-  const clearBtn     = document.getElementById('clear-btn');
-  const historyBtn   = document.getElementById('history-btn');
-  const sidebar      = document.getElementById('sidebar');
-  const sidebarOver  = document.getElementById('sidebar-overlay');
-  const sidebarClose = document.getElementById('sidebar-close-btn');
-  const newChatBtn   = document.getElementById('new-chat-btn');
-  const historyList  = document.getElementById('history-list');
-  const lightbox     = document.getElementById('lightbox');
-  const lightboxImg  = document.getElementById('lightbox-img');
+  const messagesEl    = document.getElementById('messages');
+  const inputEl       = document.getElementById('input');
+  const sendBtn       = document.getElementById('send-btn');
+  const stopBtn       = document.getElementById('stop-btn');
+  const attachBtn     = document.getElementById('attach-btn');
+  const fileInput     = document.getElementById('file-input');
+  const previewsEl    = document.getElementById('img-previews');
+  const clearBtn      = document.getElementById('clear-btn');
+  const historyBtn    = document.getElementById('history-btn');
+  const sidebar       = document.getElementById('sidebar');
+  const sidebarOver   = document.getElementById('sidebar-overlay');
+  const sidebarClose  = document.getElementById('sidebar-close-btn');
+  const newChatBtn    = document.getElementById('new-chat-btn');
+  const historyList   = document.getElementById('history-list');
+  const lightbox      = document.getElementById('lightbox');
+  const lightboxImg   = document.getElementById('lightbox-img');
+  const settingsBtn   = document.getElementById('settings-btn');
+  const settingsPanel = document.getElementById('settings-panel');
+  const settingsOver  = document.getElementById('settings-overlay');
+  const settingsClose = document.getElementById('settings-close-btn');
+  const settingsSave  = document.getElementById('settings-save-btn');
+  const settingsName  = document.getElementById('settings-name');
+  const settingsModel = document.getElementById('settings-model');
+  const settingsCtx   = document.getElementById('settings-context');
+  const clearHistBtn  = document.getElementById('clear-history-btn');
+  const nameModal     = document.getElementById('name-modal');
+  const nameInput     = document.getElementById('name-modal-input');
+  const nameBtn       = document.getElementById('name-modal-btn');
+  const spToggle      = document.getElementById('sp-toggle');
+  const spBody        = document.getElementById('sp-body');
+  const spTextarea    = document.getElementById('system-prompt-input');
 
   // ── Init ──────────────────────────────────────────────
   async function init() {
+    const s = getSettings();
+    activeModel       = s.model;
+    activeContextSize = s.contextSize;
+    activeUsername    = s.username;
     showWelcome();
     setupListeners();
-    inputEl.focus();
+    if (!activeUsername) {
+      showNameModal();
+    } else {
+      inputEl.focus();
+    }
   }
 
   // ── Listeners ─────────────────────────────────────────
@@ -225,7 +318,7 @@
     if (isStreaming) return;
     messages = item.messages;
     currentConvId = item.id;
-    // Try to restore the model selector
+    setSystemPrompt(item.systemPrompt || '');
     messagesEl.innerHTML = '';
     for (const msg of messages) {
       if (msg.role === 'user') {
@@ -263,7 +356,7 @@
     const stripped = messages.map(({ images, ...rest }) => rest);
     const existing = history.find(h => h.id === id);
     const title = existing?.title || stripped[0]?.content?.trim().slice(0, 72) || 'Image conversation';
-    const entry = { id, title, timestamp: Date.now(), model: DEFAULT_MODEL, messages: stripped };
+    const entry = { id, title, timestamp: Date.now(), model: activeModel, messages: stripped, systemPrompt: currentSystemPrompt };
     const idx = history.findIndex(h => h.id === id);
     if (idx >= 0) history[idx] = entry; else history.unshift(entry);
     try {
@@ -290,7 +383,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: DEFAULT_MODEL,
+          model: activeModel,
           messages: [{
             role: 'user',
             content: `Give this conversation a short title of 4 words or less. Reply with the title only — no punctuation, no quotes, no explanation:\n\n${excerpt}`
@@ -376,13 +469,20 @@
     stopBtn.style.display  = 'flex';
     streamText = '';
 
-    const contextMsgs = messages.slice(-MAX_CONTEXT);
+    // Capture system prompt at send time
+    currentSystemPrompt = spTextarea.value.trim();
+
+    const contextMsgs = messages.slice(-activeContextSize);
+    const systemMsgs  = currentSystemPrompt ? [{ role: 'system', content: currentSystemPrompt }] : [];
     const payload = {
-      model: DEFAULT_MODEL,
-      messages: contextMsgs.map(m => ({
-        role: m.role, content: m.content,
-        ...(m.images ? { images: m.images } : {})
-      })),
+      model: activeModel,
+      messages: [
+        ...systemMsgs,
+        ...contextMsgs.map(m => ({
+          role: m.role, content: m.content,
+          ...(m.images ? { images: m.images } : {})
+        }))
+      ],
       stream: true
     };
 
@@ -484,7 +584,8 @@
     const textHtml = msg.content
       ? `<div class="msg-text">${escHtml(msg.content)}</div>`
       : '';
-    el.innerHTML = `<div class="avatar">U</div><div class="message-body">${imagesHtml}${textHtml}</div>`;
+    const initial = activeUsername ? escHtml(activeUsername[0].toUpperCase()) : 'U';
+    el.innerHTML = `<div class="avatar">${initial}</div><div class="message-body">${imagesHtml}${textHtml}</div>`;
     messagesEl.appendChild(el);
     scrollBottom();
   }
@@ -537,6 +638,7 @@
     if (isStreaming) return;
     messages = [];
     currentConvId = null;
+    resetSystemPrompt();
     messagesEl.innerHTML = '';
     showWelcome();
     inputEl.focus();
@@ -545,10 +647,11 @@
   function showWelcome() {
     const el = document.createElement('div');
     el.id = 'welcome';
+    const greeting = activeUsername ? `Hello, ${escHtml(activeUsername)}` : 'OfflineAI';
     el.innerHTML = `
       <div class="welcome-glyph">⚡</div>
-      <h2>OfflineAI</h2>
-      <p>Chat privately with <strong>${escHtml(DEFAULT_MODEL)}</strong> running locally.<br>No data ever leaves your device.</p>`;
+      <h2>${greeting}</h2>
+      <p>Chat privately with <strong>${escHtml(activeModel)}</strong> running locally.<br>No data ever leaves your device.</p>`;
     messagesEl.appendChild(el);
   }
 
