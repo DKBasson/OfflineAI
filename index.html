@@ -77,6 +77,10 @@
       <div class="brand-dot"></div>
       OfflineAI
     </div>
+    <div id="token-counter" class="token-counter" title="Total tokens used">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      <span id="token-count">0</span>
+    </div>
     <button class="hdr-icon-btn" id="settings-btn" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
@@ -152,6 +156,7 @@
   const FALLBACK_MODEL = 'gemma4:e4b';
   const SETTINGS_KEY   = 'offlineai_settings';
   const PROMPTS_KEY    = 'offlineai_prompts';
+  const TOKENS_KEY     = 'offlineai_tokens';
   const MAX_HISTORY    = 60;
 
   // File-type constants
@@ -172,6 +177,29 @@
   }
   function persistSettings(s) {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
+  }
+
+  // ── Token tracking ────────────────────────────────────
+  function getTokenTotals() {
+    try { return JSON.parse(localStorage.getItem(TOKENS_KEY) || '{"input":0,"output":0}'); }
+    catch { return { input: 0, output: 0 }; }
+  }
+  function addTokens(inputToks, outputToks) {
+    const t = getTokenTotals();
+    t.input  += inputToks  || 0;
+    t.output += outputToks || 0;
+    try { localStorage.setItem(TOKENS_KEY, JSON.stringify(t)); } catch {}
+    renderTokenCounter(t);
+  }
+  function fmtTokens(n) {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1_000)     return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'k';
+    return String(n);
+  }
+  function renderTokenCounter(t) {
+    const total = (t.input || 0) + (t.output || 0);
+    tokenCountEl.textContent = fmtTokens(total);
+    tokenCounterEl.title = `Tokens used\nInput: ${t.input.toLocaleString()}\nOutput: ${t.output.toLocaleString()}\nTotal: ${total.toLocaleString()}`;
   }
 
   // ── Active config (loaded from settings at init) ──────
@@ -221,6 +249,8 @@
   const nameInput     = document.getElementById('name-modal-input');
   const nameBtn       = document.getElementById('name-modal-btn');
   const spSelect        = document.getElementById('sp-select');
+  const tokenCountEl    = document.getElementById('token-count');
+  const tokenCounterEl  = document.getElementById('token-counter');
   const spSavedList     = document.getElementById('sp-saved-list');
   const spAddBtn        = document.getElementById('sp-add-btn');
   const spNewForm       = document.getElementById('sp-new-form');
@@ -238,6 +268,7 @@
     showWelcome();
     setupListeners();
     renderSpSelect();
+    renderTokenCounter(getTokenTotals());
     updateAttachForModel(activeModel);
     if (!activeUsername) {
       showNameModal();
@@ -653,6 +684,7 @@
       const text = await resp.text();
       // stream:false returns one JSON line
       const d = JSON.parse(text.trim().split('\n')[0]);
+      addTokens(d.prompt_eval_count || 0, d.eval_count || 0);
       const title = d.message?.content?.trim().replace(/^["']+|["']+$/g, '').slice(0, 72);
       return title || null;
     } catch {
@@ -828,6 +860,9 @@
               streamEl.classList.add('error');
               streamText = '';
               return;
+            }
+            if (d.done) {
+              addTokens(d.prompt_eval_count || 0, d.eval_count || 0);
             }
             if (d.message?.content) {
               streamText += d.message.content;

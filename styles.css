@@ -162,6 +162,17 @@ header {
 .hdr-icon-btn:hover { background: var(--glass-hi); color: var(--text); }
 #settings-btn { margin-left: auto; }
 
+.token-counter {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 9px; border-radius: 20px;
+  background: var(--glass-md); border: 1px solid var(--border);
+  color: var(--text-3); font-size: 11px; font-weight: 600;
+  letter-spacing: .2px; cursor: default;
+  transition: color .2s, border-color .2s;
+  flex-shrink: 0;
+}
+.token-counter svg { flex-shrink: 0; opacity: .6; }
+
 .brand {
   display: flex; align-items: center; gap: 7px;
   font-size: 14px; font-weight: 600; letter-spacing: -.3px;
