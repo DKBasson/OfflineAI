@@ -86,6 +86,30 @@ async def chat(request: Request):
     return StreamingResponse(stream_ollama(), media_type="application/x-ndjson")
 
 
+@app.post("/api/pull")
+async def pull_model(request: Request):
+    body = await request.json()
+
+    async def stream_pull():
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=5.0, read=None, write=30.0, pool=5.0)
+            ) as client:
+                async with client.stream(
+                    "POST", f"{OLLAMA}/api/pull", json=body
+                ) as resp:
+                    async for chunk in resp.aiter_bytes():
+                        yield chunk
+        except httpx.ConnectError:
+            err = json.dumps({"error": "Cannot connect to Ollama."})
+            yield (err + "\n").encode()
+        except Exception as exc:
+            err = json.dumps({"error": str(exc)})
+            yield (err + "\n").encode()
+
+    return StreamingResponse(stream_pull(), media_type="application/x-ndjson")
+
+
 if __name__ == "__main__":
     import socket
     import uvicorn

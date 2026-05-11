@@ -743,6 +743,65 @@ footer  { padding-left:  max(16px, env(safe-area-inset-left));
 .sp-add-btn:hover { background: var(--accent-lo); border-color: var(--accent-b); }
 .sp-add-btn.hidden { display: none; }
 
+/* ── Keyboard shortcuts modal ─────────────────────────── */
+#shortcuts-modal {
+  position: fixed; inset: 0; z-index: 500;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+}
+#shortcuts-modal.hidden { display: none; }
+.shortcuts-card {
+  background: var(--glass-md);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border-hi); border-radius: var(--r);
+  box-shadow: var(--shadow); width: min(400px, 92vw); overflow: hidden;
+}
+.shortcuts-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+}
+.shortcuts-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.shortcuts-grid { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.sc-row { display: flex; align-items: center; gap: 14px; }
+.sc-keys { display: flex; align-items: center; gap: 5px; min-width: 140px; flex-shrink: 0; }
+kbd {
+  background: var(--glass-hi); border: 1px solid var(--border-hi);
+  border-bottom-width: 2px; border-radius: 6px; padding: 2px 7px;
+  font-family: inherit; font-size: 11px; font-weight: 600;
+  color: var(--text-2); white-space: nowrap;
+}
+.sc-row span { font-size: 13px; color: var(--text-2); }
+
+/* ── Model pull UI ─────────────────────────────────────── */
+.pull-row { display: flex; gap: 8px; margin-top: 4px; }
+.pull-input { flex: 1; }
+.pull-btn {
+  padding: 9px 14px; background: var(--glass-md); border: 1px solid var(--border-hi);
+  border-radius: 10px; color: var(--accent);
+  font-size: 13px; font-weight: 600; font-family: inherit;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: background .15s, border-color .15s;
+}
+.pull-btn:hover { background: var(--accent-lo); border-color: var(--accent-b); }
+.pull-btn:disabled { opacity: .45; cursor: not-allowed; }
+.pull-status {
+  font-size: 12px; color: var(--text-2); margin-top: 8px;
+  padding: 7px 10px; background: var(--glass);
+  border: 1px solid var(--border); border-radius: 8px; line-height: 1.5;
+}
+.pull-status.hidden { display: none; }
+.pull-status.success { color: #30d158; border-color: rgba(48,209,88,.25); }
+.pull-status.error   { color: var(--err-text); border-color: rgba(255,69,58,.25); }
+
+/* ── History rename input ─────────────────────────────── */
+.history-rename-input {
+  width: 100%; background: var(--glass-hi); border: 1px solid var(--accent-b);
+  border-radius: 6px; padding: 1px 6px; margin-bottom: 3px;
+  color: var(--text); font-size: 13px; font-weight: 500; font-family: inherit;
+  outline: none;
+}
+
 @media (max-width: 600px) {
   #settings-panel { width: min(85vw, 300px); }
 }

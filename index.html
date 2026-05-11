@@ -30,6 +30,11 @@
         <label class="settings-label">Model</label>
         <span class="settings-hint">The Ollama model used for all new messages. To add models, run <code>ollama pull &lt;name&gt;</code> in your terminal. Larger models are slower but more capable.</span>
         <select class="settings-select" id="settings-model"></select>
+        <div class="pull-row">
+          <input class="settings-input pull-input" id="pull-model-input" type="text" placeholder="Pull a new model name…" autocomplete="off" spellcheck="false">
+          <button class="pull-btn" id="pull-btn">Pull</button>
+        </div>
+        <div id="pull-status" class="pull-status hidden"></div>
       </div>
       <div class="settings-group">
         <label class="settings-label">Context window</label>
@@ -92,9 +97,23 @@
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
       </svg>
     </button>
-    <button class="hdr-icon-btn" id="clear-btn" title="New chat">
+    <button class="hdr-icon-btn" id="clear-btn" title="New chat (⌘K)">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </button>
+    <button class="hdr-icon-btn" id="export-btn" title="Export chat (⌘E)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+    </button>
+    <button class="hdr-icon-btn" id="shortcuts-btn" title="Keyboard shortcuts (?)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
       </svg>
     </button>
   </header>
@@ -144,6 +163,45 @@
 
   <div id="lightbox">
     <img id="lightbox-img" src="" alt="">
+  </div>
+
+  <div id="shortcuts-modal" class="hidden">
+    <div class="shortcuts-card">
+      <div class="shortcuts-hdr">
+        <span class="shortcuts-title">Keyboard Shortcuts</span>
+        <button class="sidebar-close" id="shortcuts-close-btn">✕</button>
+      </div>
+      <div class="shortcuts-grid">
+        <div class="sc-row"><div class="sc-keys"><kbd>Enter</kbd></div><span>Send message</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd>Shift</kbd> + <kbd>Enter</kbd></div><span>New line</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd>Esc</kbd></div><span>Close panels</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd>?</kbd></div><span>Show shortcuts</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>K</kbd></div><span>New chat</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>L</kbd></div><span>Toggle history</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>E</kbd></div><span>Export chat</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>/</kbd></div><span>Focus message input</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="shortcuts-modal" class="hidden">
+    <div class="shortcuts-card">
+      <div class="shortcuts-hdr">
+        <span class="shortcuts-title">Keyboard Shortcuts</span>
+        <button class="sidebar-close" id="shortcuts-close-btn">✕</button>
+      </div>
+      <div class="shortcuts-grid">
+        <div class="sc-row"><div class="sc-keys"><kbd>Enter</kbd></div><span>Send message</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd>Shift</kbd> + <kbd>Enter</kbd></div><span>New line</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd>Esc</kbd></div><span>Close panels</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd>?</kbd></div><span>Show shortcuts</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>K</kbd></div><span>New chat</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>L</kbd></div><span>Toggle history</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>E</kbd></div><span>Export chat</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>/</kbd></div><span>Focus input</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd>dblclick</kbd></div><span>Rename conversation</span></div>
+      </div>
+    </div>
   </div>
 
   <div id="name-modal" class="hidden">
@@ -263,6 +321,17 @@
   const spNewContent    = document.getElementById('sp-new-content');
   const spNewSave       = document.getElementById('sp-new-save');
   const spNewCancel     = document.getElementById('sp-new-cancel');
+  const pullInput       = document.getElementById('pull-model-input');
+  const pullBtn         = document.getElementById('pull-btn');
+  const pullStatus      = document.getElementById('pull-status');
+  const exportBtn       = document.getElementById('export-btn');
+  const shortcutsBtn    = document.getElementById('shortcuts-btn');
+  const shortcutsModal  = document.getElementById('shortcuts-modal');
+  const shortcutsClose  = document.getElementById('shortcuts-close-btn');
+
+  // Detect modifier key for display
+  const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
+  if (!isMac) document.querySelectorAll('.sc-mod').forEach(el => el.textContent = 'Ctrl');
 
   // ── Init ──────────────────────────────────────────────
   async function init() {
@@ -449,6 +518,122 @@
     renderSpSelect();
   }
 
+  // ── Export conversation ───────────────────────────────
+  function exportConversation() {
+    if (!messages.length) return;
+    const history = getHistory();
+    const conv    = history.find(h => h.id === currentConvId);
+    const title   = conv?.title || 'Conversation';
+    const date    = new Date().toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
+    let md = `# ${title}\n\n**Model:** ${activeModel}  \n**Date:** ${date}\n\n---\n\n`;
+    for (const msg of messages) {
+      if (msg.role === 'user')      md += `**You:** ${msg.content}\n\n`;
+      else if (msg.role === 'assistant') md += `**AI:** ${msg.content}\n\n`;
+    }
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = title.replace(/[^a-z0-9]/gi, '_').slice(0, 60) + '.md';
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  // ── Keyboard shortcuts modal ──────────────────────────
+  function showShortcuts() { shortcutsModal.classList.remove('hidden'); }
+  function closeShortcuts() { shortcutsModal.classList.add('hidden'); }
+
+  // ── Conversation rename ───────────────────────────────
+  function startRename(div, item) {
+    const titleEl = div.querySelector('.history-title');
+    if (!titleEl) return;
+    const orig  = item.title;
+    const input = document.createElement('input');
+    input.className = 'history-rename-input';
+    input.value = orig;
+    titleEl.replaceWith(input);
+    input.focus(); input.select();
+    const save = () => {
+      const newTitle = input.value.trim() || orig;
+      const h = getHistory();
+      const i = h.findIndex(x => x.id === item.id);
+      if (i >= 0) { h[i].title = newTitle; item.title = newTitle; }
+      try { localStorage.setItem('offlineai_history', JSON.stringify(h)); } catch {}
+      const newEl = document.createElement('div');
+      newEl.className = 'history-title'; newEl.title = 'Double-click to rename';
+      newEl.textContent = newTitle;
+      newEl.addEventListener('dblclick', e => { e.stopPropagation(); startRename(div, item); });
+      input.replaceWith(newEl);
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.value = orig; input.blur(); }
+    });
+  }
+
+  // ── Model pull ────────────────────────────────────────
+  async function pullModel(modelName) {
+    const name = modelName.trim();
+    if (!name) { pullInput.focus(); return; }
+    pullBtn.disabled = true;
+    pullStatus.classList.remove('hidden', 'success', 'error');
+    pullStatus.textContent = 'Connecting…';
+    try {
+      const resp = await fetch('/api/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, stream: true })
+      });
+      const reader = resp.body.getReader();
+      const dec    = new TextDecoder();
+      let   buf    = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n'); buf = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const d = JSON.parse(line);
+            if (d.error) {
+              pullStatus.textContent = `Error: ${d.error}`;
+              pullStatus.classList.add('error'); return;
+            }
+            if (d.status) {
+              if (d.total && d.completed) {
+                const pct = Math.round((d.completed / d.total) * 100);
+                pullStatus.textContent = `${d.status} — ${pct}%`;
+              } else {
+                pullStatus.textContent = d.status;
+              }
+            }
+          } catch { /* malformed */ }
+        }
+      }
+      pullStatus.textContent = `✓ ${name} ready`;
+      pullStatus.classList.add('success');
+      pullInput.value = '';
+      // Refresh model dropdown
+      const r    = await fetch('/api/models');
+      const data = await r.json();
+      const models = (data.models || []).map(m => m.name);
+      settingsModel.innerHTML = '';
+      const current = getSettings().model;
+      if (!models.includes(current)) models.unshift(current);
+      for (const m of models) {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = m;
+        if (m === current) opt.selected = true;
+        settingsModel.appendChild(opt);
+      }
+    } catch (e) {
+      pullStatus.textContent = `Error: ${e.message}`;
+      pullStatus.classList.add('error');
+    } finally {
+      pullBtn.disabled = false;
+    }
+  }
+
   // ── Listeners ─────────────────────────────────────────
   function setupListeners() {
     sendBtn.addEventListener('click', sendMessage);
@@ -515,6 +700,13 @@
       e.target.value = '';
     });
 
+    exportBtn.addEventListener('click', exportConversation);
+    shortcutsBtn.addEventListener('click', showShortcuts);
+    shortcutsClose.addEventListener('click', closeShortcuts);
+    shortcutsModal.addEventListener('click', e => { if (e.target === shortcutsModal) closeShortcuts(); });
+    pullBtn.addEventListener('click', () => pullModel(pullInput.value));
+    pullInput.addEventListener('keydown', e => { if (e.key === 'Enter') pullModel(pullInput.value); });
+
     inputEl.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
@@ -555,12 +747,21 @@
     lightbox.addEventListener('click', () => lightbox.classList.remove('open'));
 
     document.addEventListener('keydown', e => {
+      const inInput = ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
+      const mod     = isMac ? e.metaKey : e.ctrlKey;
+
       if (e.key === 'Escape') {
         lightbox.classList.remove('open');
         closeSidebar();
         closeSettings();
+        closeShortcuts();
         if (!nameModal.classList.contains('hidden') && activeUsername) nameModal.classList.add('hidden');
       }
+      if (!inInput && e.key === '?')       { e.preventDefault(); showShortcuts(); }
+      if (mod && e.key === 'k')            { e.preventDefault(); startNewChat(); }
+      if (mod && e.key === 'l')            { e.preventDefault(); toggleSidebar(); }
+      if (mod && e.key === 'e')            { e.preventDefault(); exportConversation(); }
+      if (mod && e.key === '/')            { e.preventDefault(); inputEl.focus(); }
     });
   }
 
@@ -598,6 +799,9 @@
         </div>
         <button class="history-del-btn" title="Delete conversation" aria-label="Delete">✕</button>`;
       div.querySelector('.history-item-main').addEventListener('click', () => loadConversation(item));
+      const titleEl = div.querySelector('.history-title');
+      titleEl.title = 'Double-click to rename';
+      titleEl.addEventListener('dblclick', e => { e.stopPropagation(); startRename(div, item); });
       div.querySelector('.history-del-btn').addEventListener('click', e => {
         e.stopPropagation();
         const h = getHistory().filter(x => x.id !== item.id);
@@ -870,8 +1074,9 @@
               addTokens(d.prompt_eval_count || 0, d.eval_count || 0);
             }
             if (d.message?.content) {
-              streamText += d.message.content;
-              streamEl.textContent = streamText;
+              const chunk = d.message.content;
+              streamText += chunk;
+              streamEl.appendChild(document.createTextNode(chunk));
               scrollBottom();
             }
           } catch { /* malformed chunk */ }
