@@ -35,6 +35,20 @@
         <span class="settings-hint">Max messages sent per request (4–100)</span>
         <input class="settings-input" id="settings-context" type="number" min="4" max="100" step="1">
       </div>
+      <div class="settings-group">
+        <label class="settings-label">System prompts</label>
+        <span class="settings-hint">Saved prompts you can load into any conversation</span>
+        <div id="sp-saved-list"></div>
+        <div id="sp-new-form" class="sp-new-form hidden">
+          <input class="settings-input" id="sp-new-name" type="text" placeholder="Prompt name…" maxlength="48">
+          <textarea class="settings-input sp-new-content" id="sp-new-content" placeholder="Prompt instructions…" rows="4"></textarea>
+          <div class="sp-new-actions">
+            <button class="sp-new-cancel-btn" id="sp-new-cancel">Cancel</button>
+            <button class="sp-new-save-btn" id="sp-new-save">Save prompt</button>
+          </div>
+        </div>
+        <button class="sp-add-btn" id="sp-add-btn">+ Add prompt</button>
+      </div>
       <div class="settings-group settings-group--danger">
         <button class="settings-danger-btn" id="clear-history-btn">Clear all history</button>
       </div>
@@ -85,6 +99,11 @@
         System prompt
       </button>
       <div id="sp-body" class="sp-body">
+        <div class="sp-select-row">
+          <select id="sp-preset-select" class="sp-preset-select">
+            <option value="">— load saved prompt —</option>
+          </select>
+        </div>
         <textarea id="system-prompt-input" class="sp-textarea" placeholder="Optional instructions for this conversation… e.g. 'Reply in French' or 'Act as a code reviewer'" rows="3"></textarea>
       </div>
     </div>
@@ -138,6 +157,7 @@
   // ── Config / Defaults ─────────────────────────────────
   const FALLBACK_MODEL = 'gemma4:e4b';
   const SETTINGS_KEY   = 'offlineai_settings';
+  const PROMPTS_KEY    = 'offlineai_prompts';
   const MAX_HISTORY    = 60;
 
   // File-type constants
@@ -205,9 +225,17 @@
   const nameModal     = document.getElementById('name-modal');
   const nameInput     = document.getElementById('name-modal-input');
   const nameBtn       = document.getElementById('name-modal-btn');
-  const spToggle      = document.getElementById('sp-toggle');
-  const spBody        = document.getElementById('sp-body');
-  const spTextarea    = document.getElementById('system-prompt-input');
+  const spToggle        = document.getElementById('sp-toggle');
+  const spBody          = document.getElementById('sp-body');
+  const spTextarea      = document.getElementById('system-prompt-input');
+  const spPresetSelect  = document.getElementById('sp-preset-select');
+  const spSavedList     = document.getElementById('sp-saved-list');
+  const spAddBtn        = document.getElementById('sp-add-btn');
+  const spNewForm       = document.getElementById('sp-new-form');
+  const spNewName       = document.getElementById('sp-new-name');
+  const spNewContent    = document.getElementById('sp-new-content');
+  const spNewSave       = document.getElementById('sp-new-save');
+  const spNewCancel     = document.getElementById('sp-new-cancel');
 
   // ── Init ──────────────────────────────────────────────
   async function init() {
@@ -290,6 +318,8 @@
       opt.value = s.model; opt.textContent = s.model; opt.selected = true;
       settingsModel.appendChild(opt);
     }
+    renderSpSavedList();
+    renderSpPresetSelect();
     settingsPanel.classList.add('open');
     settingsOver.classList.add('open');
   }
@@ -311,6 +341,45 @@
     }
     updateAttachForModel(activeModel);
     closeSettings();
+  }
+
+  // ── Saved prompts ─────────────────────────────────────
+  function getSavedPrompts() {
+    try { return JSON.parse(localStorage.getItem(PROMPTS_KEY) || '[]'); }
+    catch { return []; }
+  }
+  function persistSavedPrompts(arr) {
+    try { localStorage.setItem(PROMPTS_KEY, JSON.stringify(arr)); } catch {}
+  }
+  function renderSpSavedList() {
+    const items = getSavedPrompts();
+    if (!items.length) {
+      spSavedList.innerHTML = '<div class="sp-saved-empty">No saved prompts yet</div>';
+      return;
+    }
+    spSavedList.innerHTML = '';
+    items.forEach((p, i) => {
+      const row = document.createElement('div');
+      row.className = 'sp-saved-item';
+      row.innerHTML = `
+        <span class="sp-saved-name">${escHtml(p.name)}</span>
+        <button class="sp-saved-del" title="Delete" aria-label="Delete">✕</button>`;
+      row.querySelector('.sp-saved-del').addEventListener('click', () => {
+        const updated = getSavedPrompts().filter((_, j) => j !== i);
+        persistSavedPrompts(updated);
+        renderSpSavedList();
+        renderSpPresetSelect();
+      });
+      spSavedList.appendChild(row);
+    });
+  }
+  function renderSpPresetSelect() {
+    spPresetSelect.innerHTML = '<option value="">— load saved prompt —</option>';
+    for (const p of getSavedPrompts()) {
+      const opt = document.createElement('option');
+      opt.value = p.content; opt.textContent = p.name;
+      spPresetSelect.appendChild(opt);
+    }
   }
 
   // ── System prompt ─────────────────────────────────────
@@ -358,6 +427,34 @@
     nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitName(); });
     spToggle.addEventListener('click', toggleSystemPrompt);
     spTextarea.addEventListener('input', updateSpToggleState);
+    spPresetSelect.addEventListener('change', () => {
+      if (!spPresetSelect.value) return;
+      setSystemPrompt(spPresetSelect.value);
+      spPresetSelect.value = '';
+    });
+    spAddBtn.addEventListener('click', () => {
+      spNewForm.classList.remove('hidden');
+      spAddBtn.classList.add('hidden');
+      spNewName.focus();
+    });
+    spNewCancel.addEventListener('click', () => {
+      spNewForm.classList.add('hidden');
+      spAddBtn.classList.remove('hidden');
+      spNewName.value = ''; spNewContent.value = '';
+    });
+    spNewSave.addEventListener('click', () => {
+      const name    = spNewName.value.trim();
+      const content = spNewContent.value.trim();
+      if (!name || !content) { (name ? spNewContent : spNewName).focus(); return; }
+      const prompts = getSavedPrompts();
+      prompts.push({ id: String(Date.now()), name, content });
+      persistSavedPrompts(prompts);
+      renderSpSavedList();
+      renderSpPresetSelect();
+      spNewForm.classList.add('hidden');
+      spAddBtn.classList.remove('hidden');
+      spNewName.value = ''; spNewContent.value = '';
+    });
 
     attachBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', e => {

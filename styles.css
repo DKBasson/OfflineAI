@@ -662,6 +662,64 @@ footer  { padding-left:  max(16px, env(safe-area-inset-left));
 .sp-textarea:focus { border-color: rgba(10,132,255,.3); }
 .sp-textarea::placeholder { color: var(--text-3); }
 
+/* ── Preset select (chat footer) ──────────────────────── */
+.sp-select-row { margin-bottom: 6px; }
+.sp-preset-select {
+  width: 100%; background: var(--glass); border: 1px solid var(--border);
+  border-radius: 10px; padding: 7px 10px;
+  color: var(--text-2); font-size: 12px; font-family: inherit;
+  outline: none; cursor: pointer; -webkit-appearance: none; appearance: none;
+  transition: border-color .2s;
+}
+.sp-preset-select:focus { border-color: rgba(10,132,255,.3); }
+.sp-preset-select option { background: #0e0e18; color: var(--text); }
+
+/* ── Saved prompts list (settings panel) ──────────────── */
+.sp-saved-empty { font-size: 12px; color: var(--text-3); padding: 4px 0 8px; }
+.sp-saved-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 8px;
+  background: var(--glass); border: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.sp-saved-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 13px; color: var(--text);
+}
+.sp-saved-del {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%;
+  background: transparent; border: 1px solid transparent;
+  color: var(--text-3); font-size: 10px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+}
+.sp-saved-del:hover { background: var(--glass-hi); border-color: var(--border-hi); color: var(--text); }
+.sp-new-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.sp-new-content { resize: vertical; min-height: 80px; font-size: 13px; line-height: 1.5; }
+.sp-new-actions { display: flex; gap: 8px; }
+.sp-new-cancel-btn {
+  flex: 1; padding: 8px;
+  background: var(--glass-md); border: 1px solid var(--border-hi);
+  border-radius: 10px; color: var(--text-2); font-size: 13px; font-family: inherit;
+  cursor: pointer; transition: background .15s;
+}
+.sp-new-cancel-btn:hover { background: var(--glass-hi); }
+.sp-new-save-btn {
+  flex: 1; padding: 8px;
+  background: var(--accent); border: none;
+  border-radius: 10px; color: #fff; font-size: 13px; font-weight: 600; font-family: inherit;
+  cursor: pointer; transition: background .15s;
+}
+.sp-new-save-btn:hover { background: #0070e0; }
+.sp-add-btn {
+  background: none; border: 1px dashed var(--border-hi); border-radius: 10px;
+  padding: 8px; color: var(--accent); font-size: 13px; font-family: inherit;
+  cursor: pointer; text-align: center; width: 100%;
+  transition: background .15s, border-color .15s;
+}
+.sp-add-btn:hover { background: var(--accent-lo); border-color: var(--accent-b); }
+.sp-add-btn.hidden { display: none; }
+
 @media (max-width: 600px) {
   #settings-panel { width: min(85vw, 300px); }
 }
