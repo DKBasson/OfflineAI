@@ -367,6 +367,17 @@ footer {
   cursor: pointer; transition: color .15s;
 }
 .img-thumb .rm-img:hover { color: var(--text); }
+.file-thumb {
+  width: 72px; height: 56px; border-radius: 10px;
+  background: var(--glass-md); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.file-thumb-name {
+  font-size: 9px; color: var(--text-2);
+  word-break: break-all; text-align: center; padding: 4px;
+  line-height: 1.3; max-height: 100%; overflow: hidden;
+}
 
 .input-wrap {
   display: flex; align-items: flex-end; gap: 8px;

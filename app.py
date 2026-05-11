@@ -49,6 +49,17 @@ async def get_models():
         return {"models": [{"name": "gemma4:e4b"}]}
 
 
+@app.post("/api/show")
+async def show_model(request: Request):
+    body = await request.json()
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(f"{OLLAMA}/api/show", json=body)
+            return r.json()
+    except Exception:
+        return {}
+
+
 @app.post("/api/chat")
 async def chat(request: Request):
     body = await request.json()

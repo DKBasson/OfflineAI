@@ -110,14 +110,14 @@
       </div>
     </div>
     <input type="file" id="file-input" accept="image/*" multiple hidden>
-    <p class="footer-hint">Enter to send · Shift+Enter for newline · Paste or drag images to attach</p>
+    <p class="footer-hint">Enter to send · Shift+Enter for newline · Paste or drag files to attach</p>
   </footer>
 
   <div id="drag-overlay">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
     </svg>
-    Drop images to attach
+    Drop files to attach
   </div>
 
   <div id="lightbox">
@@ -139,6 +139,12 @@
   const FALLBACK_MODEL = 'gemma4:e4b';
   const SETTINGS_KEY   = 'offlineai_settings';
   const MAX_HISTORY    = 60;
+
+  // File-type constants
+  const IMAGE_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp';
+  const TEXT_ACCEPT  = '.txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.csv,.xml,.yaml,.yml,.sh,.bash,.html,.css,.java,.c,.cpp,.h,.rs,.go,.rb,.php,.swift,.kt,.sql,.toml,.ini,.conf,.env,.log';
+  // Capability cache: modelName → { vision: bool }
+  const modelCaps = {};
 
   // Configure marked once at startup
   marked.use({ breaks: true, gfm: true });
@@ -162,6 +168,7 @@
   // ── State ─────────────────────────────────────────────
   let messages            = [];
   let pendingImages       = [];
+  let pendingFiles        = []; // { name, content (text) }
   let isStreaming         = false;
   let abortCtrl           = null;
   let streamEl            = null;
@@ -210,6 +217,7 @@
     activeUsername    = s.username;
     showWelcome();
     setupListeners();
+    updateAttachForModel(activeModel);
     if (!activeUsername) {
       showNameModal();
     } else {
@@ -233,6 +241,31 @@
     document.getElementById('welcome')?.remove();
     showWelcome();
     inputEl.focus();
+  }
+
+  // ── Model capabilities ────────────────────────────────
+  async function fetchModelCaps(model) {
+    if (modelCaps[model]) return modelCaps[model];
+    try {
+      const r    = await fetch('/api/show', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: model }) });
+      const data = await r.json();
+      // Newer Ollama: data.capabilities = ["completion","tools","vision",...]
+      // Older Ollama: data.details.families includes "clip"
+      const caps = data.capabilities || [];
+      const fams = data.details?.families || [];
+      const vision = caps.includes('vision') || fams.includes('clip');
+      modelCaps[model] = { vision };
+    } catch {
+      modelCaps[model] = { vision: false };
+    }
+    return modelCaps[model];
+  }
+
+  async function updateAttachForModel(model) {
+    const caps = await fetchModelCaps(model);
+    fileInput.accept = caps.vision
+      ? IMAGE_ACCEPT + ',' + TEXT_ACCEPT
+      : TEXT_ACCEPT;
   }
 
   // ── Settings panel ────────────────────────────────────
@@ -276,6 +309,7 @@
       document.getElementById('welcome')?.remove();
       showWelcome();
     }
+    updateAttachForModel(activeModel);
     closeSettings();
   }
 
@@ -327,8 +361,8 @@
 
     attachBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', e => {
-      const files = [...e.target.files].filter(f => f.type.startsWith('image/'));
-      if (files.length) addImages(files);
+      const files = [...e.target.files];
+      if (files.length) addFiles(files);
       e.target.value = '';
     });
 
@@ -340,10 +374,8 @@
     // Drag & drop
     let dragCount = 0;
     document.addEventListener('dragenter', e => {
-      const hasImg = [...(e.dataTransfer?.items || [])].some(
-        i => i.kind === 'file' && i.type.startsWith('image/')
-      );
-      if (hasImg) { dragCount++; document.body.classList.add('drag-active'); }
+      const hasFile = [...(e.dataTransfer?.items || [])].some(i => i.kind === 'file');
+      if (hasFile) { dragCount++; document.body.classList.add('drag-active'); }
     });
     document.addEventListener('dragleave', () => {
       dragCount = Math.max(0, dragCount - 1);
@@ -353,14 +385,15 @@
     document.addEventListener('drop', e => {
       e.preventDefault(); dragCount = 0;
       document.body.classList.remove('drag-active');
-      const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
-      if (files.length) addImages(files);
+      const files = [...e.dataTransfer.files];
+      if (files.length) addFiles(files);
     });
 
     // Paste
     document.addEventListener('paste', e => {
-      const imgs = [...e.clipboardData.items].filter(i => i.type.startsWith('image/'));
-      if (imgs.length) { e.preventDefault(); addImages(imgs.map(i => i.getAsFile())); }
+      const items = [...e.clipboardData.items];
+      const imgs = items.filter(i => i.type.startsWith('image/'));
+      if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => i.getAsFile())); }
     });
 
     // Lightbox
@@ -511,14 +544,27 @@
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
-  // ── Image helpers ─────────────────────────────────────
-  async function addImages(files) {
+  // ── File helpers ──────────────────────────────────────
+  async function addFiles(files) {
+    const caps = await fetchModelCaps(activeModel);
     for (const file of files) {
-      const dataUrl = await readDataUrl(file);
-      pendingImages.push({ dataUrl, base64: dataUrl.split(',')[1] });
+      if (file.type.startsWith('image/')) {
+        if (caps.vision) {
+          const dataUrl = await readDataUrl(file);
+          pendingImages.push({ dataUrl, base64: dataUrl.split(',')[1] });
+        }
+      } else {
+        try {
+          const content = await readTextFile(file);
+          pendingFiles.push({ name: file.name, content });
+        } catch { /* skip unreadable */ }
+      }
     }
     renderPreviews();
   }
+
+  // Convenience alias kept for drag/paste image paths
+  async function addImages(files) { await addFiles(files); }
 
   function readDataUrl(file) {
     return new Promise(resolve => {
@@ -528,9 +574,18 @@
     });
   }
 
+  function readTextFile(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload  = e => resolve(e.target.result);
+      r.onerror = reject;
+      r.readAsText(file);
+    });
+  }
+
   function renderPreviews() {
     previewsEl.innerHTML = '';
-    if (!pendingImages.length) { previewsEl.style.display = 'none'; return; }
+    if (!pendingImages.length && !pendingFiles.length) { previewsEl.style.display = 'none'; return; }
     previewsEl.style.display = 'flex';
     pendingImages.forEach((img, i) => {
       const div = document.createElement('div');
@@ -544,17 +599,40 @@
       div.appendChild(thumb); div.appendChild(rm);
       previewsEl.appendChild(div);
     });
+    pendingFiles.forEach((f, i) => {
+      const div = document.createElement('div');
+      div.className = 'img-thumb file-thumb';
+      div.title = f.name;
+      const label = document.createElement('span');
+      label.className = 'file-thumb-name';
+      label.textContent = f.name;
+      const rm = document.createElement('button');
+      rm.className = 'rm-img'; rm.textContent = '×';
+      rm.setAttribute('aria-label', 'Remove file');
+      rm.addEventListener('click', () => { pendingFiles.splice(i, 1); renderPreviews(); });
+      div.appendChild(label); div.appendChild(rm);
+      previewsEl.appendChild(div);
+    });
   }
 
   // ── Send ──────────────────────────────────────────────
   async function sendMessage() {
     if (isStreaming) return;
     const text = inputEl.value.trim();
-    if (!text && !pendingImages.length) return;
+    if (!text && !pendingImages.length && !pendingFiles.length) return;
+
+    // Prepend attached text files as code blocks in the message content
+    let fullContent = text;
+    if (pendingFiles.length) {
+      const fileBlocks = pendingFiles.map(f =>
+        `**${f.name}**\n\`\`\`\n${f.content}\n\`\`\``
+      ).join('\n\n');
+      fullContent = fileBlocks + (text ? '\n\n' + text : '');
+    }
 
     const imgs    = [...pendingImages];
     const userMsg = {
-      role: 'user', content: text,
+      role: 'user', content: fullContent,
       ...(imgs.length ? { images: imgs.map(i => i.base64) } : {})
     };
     messages.push(userMsg);
@@ -562,6 +640,7 @@
     inputEl.value = '';
     autoResize(inputEl);
     pendingImages = [];
+    pendingFiles  = [];
     renderPreviews();
 
     appendUserBubble(userMsg, imgs);
