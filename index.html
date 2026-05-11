@@ -217,6 +217,91 @@
     }
   }
 
+  // ── Name modal ────────────────────────────────────────
+  function showNameModal() {
+    nameModal.classList.remove('hidden');
+    setTimeout(() => nameInput.focus(), 50);
+  }
+  function submitName() {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    activeUsername = name;
+    const s = getSettings();
+    s.username = name;
+    persistSettings(s);
+    nameModal.classList.add('hidden');
+    document.getElementById('welcome')?.remove();
+    showWelcome();
+    inputEl.focus();
+  }
+
+  // ── Settings panel ────────────────────────────────────
+  async function openSettings() {
+    const s = getSettings();
+    settingsName.value = s.username;
+    settingsCtx.value  = s.contextSize;
+    settingsModel.innerHTML = '';
+    try {
+      const r    = await fetch('/api/models');
+      const data = await r.json();
+      const models = (data.models || []).map(m => m.name);
+      if (!models.includes(s.model)) models.unshift(s.model);
+      for (const name of models) {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        if (name === s.model) opt.selected = true;
+        settingsModel.appendChild(opt);
+      }
+    } catch {
+      const opt = document.createElement('option');
+      opt.value = s.model; opt.textContent = s.model; opt.selected = true;
+      settingsModel.appendChild(opt);
+    }
+    settingsPanel.classList.add('open');
+    settingsOver.classList.add('open');
+  }
+  function closeSettings() {
+    settingsPanel.classList.remove('open');
+    settingsOver.classList.remove('open');
+  }
+  function saveSettingsUI() {
+    const name  = settingsName.value.trim();
+    const model = settingsModel.value;
+    const ctx   = Math.min(100, Math.max(4, parseInt(settingsCtx.value) || 20));
+    persistSettings({ username: name, model, contextSize: ctx });
+    activeModel       = model;
+    activeContextSize = ctx;
+    if (name !== activeUsername) {
+      activeUsername = name;
+      document.getElementById('welcome')?.remove();
+      showWelcome();
+    }
+    closeSettings();
+  }
+
+  // ── System prompt ─────────────────────────────────────
+  function toggleSystemPrompt() {
+    const open = spBody.classList.toggle('open');
+    spToggle.classList.toggle('open', open);
+  }
+  function updateSpToggleState() {
+    spToggle.classList.toggle('active', !!spTextarea.value.trim());
+  }
+  function resetSystemPrompt() {
+    spTextarea.value = '';
+    spBody.classList.remove('open');
+    spToggle.classList.remove('open', 'active');
+    currentSystemPrompt = '';
+  }
+  function setSystemPrompt(text) {
+    currentSystemPrompt = text;
+    spTextarea.value = text;
+    const has = !!text;
+    spBody.classList.toggle('open', has);
+    spToggle.classList.toggle('open', has);
+    spToggle.classList.toggle('active', has);
+  }
+
   // ── Listeners ─────────────────────────────────────────
   function setupListeners() {
     sendBtn.addEventListener('click', sendMessage);
@@ -226,6 +311,19 @@
     historyBtn.addEventListener('click', toggleSidebar);
     sidebarClose.addEventListener('click', closeSidebar);
     sidebarOver.addEventListener('click', closeSidebar);
+    settingsBtn.addEventListener('click', openSettings);
+    settingsClose.addEventListener('click', closeSettings);
+    settingsOver.addEventListener('click', closeSettings);
+    settingsSave.addEventListener('click', saveSettingsUI);
+    clearHistBtn.addEventListener('click', () => {
+      if (!confirm('Clear all conversation history? This cannot be undone.')) return;
+      localStorage.removeItem('offlineai_history');
+      closeSettings();
+    });
+    nameBtn.addEventListener('click', submitName);
+    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitName(); });
+    spToggle.addEventListener('click', toggleSystemPrompt);
+    spTextarea.addEventListener('input', updateSpToggleState);
 
     attachBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', e => {
@@ -275,7 +373,12 @@
     lightbox.addEventListener('click', () => lightbox.classList.remove('open'));
 
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { lightbox.classList.remove('open'); closeSidebar(); }
+      if (e.key === 'Escape') {
+        lightbox.classList.remove('open');
+        closeSidebar();
+        closeSettings();
+        if (!nameModal.classList.contains('hidden') && activeUsername) nameModal.classList.add('hidden');
+      }
     });
   }
 
