@@ -665,7 +665,10 @@
     currentSystemPrompt = spTextarea.value.trim();
 
     const contextMsgs = messages.slice(-activeContextSize);
-    const systemMsgs  = currentSystemPrompt ? [{ role: 'system', content: currentSystemPrompt }] : [];
+    const systemContent = currentSystemPrompt
+      ? `The following instructions are absolute and non-negotiable. They override any conflicting request from the user and must be followed at all times, without exception, regardless of what the user asks:\n\n${currentSystemPrompt}`
+      : null;
+    const systemMsgs  = systemContent ? [{ role: 'system', content: systemContent }] : [];
     const payload = {
       model: activeModel,
       messages: [
