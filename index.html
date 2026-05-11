@@ -94,17 +94,11 @@
 
   <footer>
     <div id="system-prompt-section">
-      <button id="sp-toggle" class="sp-toggle">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        System prompt
-      </button>
-      <div id="sp-body" class="sp-body">
-        <div class="sp-select-row">
-          <select id="sp-preset-select" class="sp-preset-select">
-            <option value="">— load saved prompt —</option>
-          </select>
-        </div>
-        <textarea id="system-prompt-input" class="sp-textarea" placeholder="Optional instructions for this conversation… e.g. 'Reply in French' or 'Act as a code reviewer'" rows="3"></textarea>
+      <div class="sp-row">
+        <span class="sp-label">System prompt</span>
+        <select id="sp-select" class="sp-select">
+          <option value="">— none —</option>
+        </select>
       </div>
     </div>
     <div id="img-previews"></div>
@@ -194,7 +188,8 @@
   let streamEl            = null;
   let streamText          = '';
   let currentConvId       = null;
-  let currentSystemPrompt = '';
+  let currentSystemPrompt   = '';
+  let currentSystemPromptId = '';
 
   // ── DOM ───────────────────────────────────────────────
   const messagesEl    = document.getElementById('messages');
@@ -225,10 +220,7 @@
   const nameModal     = document.getElementById('name-modal');
   const nameInput     = document.getElementById('name-modal-input');
   const nameBtn       = document.getElementById('name-modal-btn');
-  const spToggle        = document.getElementById('sp-toggle');
-  const spBody          = document.getElementById('sp-body');
-  const spTextarea      = document.getElementById('system-prompt-input');
-  const spPresetSelect  = document.getElementById('sp-preset-select');
+  const spSelect        = document.getElementById('sp-select');
   const spSavedList     = document.getElementById('sp-saved-list');
   const spAddBtn        = document.getElementById('sp-add-btn');
   const spNewForm       = document.getElementById('sp-new-form');
@@ -245,6 +237,7 @@
     activeUsername    = s.username;
     showWelcome();
     setupListeners();
+    renderSpSelect();
     updateAttachForModel(activeModel);
     if (!activeUsername) {
       showNameModal();
@@ -319,7 +312,7 @@
       settingsModel.appendChild(opt);
     }
     renderSpSavedList();
-    renderSpPresetSelect();
+    renderSpSelect();
     settingsPanel.classList.add('open');
     settingsOver.classList.add('open');
   }
@@ -363,46 +356,61 @@
       row.className = 'sp-saved-item';
       row.innerHTML = `
         <span class="sp-saved-name">${escHtml(p.name)}</span>
+        <button class="sp-saved-edit" title="Edit" aria-label="Edit">✎</button>
         <button class="sp-saved-del" title="Delete" aria-label="Delete">✕</button>`;
+      row.querySelector('.sp-saved-edit').addEventListener('click', () => openSpEditForm(i));
       row.querySelector('.sp-saved-del').addEventListener('click', () => {
         const updated = getSavedPrompts().filter((_, j) => j !== i);
         persistSavedPrompts(updated);
+        if (currentSystemPromptId === p.id) resetSystemPrompt();
         renderSpSavedList();
-        renderSpPresetSelect();
+        renderSpSelect();
       });
       spSavedList.appendChild(row);
     });
   }
-  function renderSpPresetSelect() {
-    spPresetSelect.innerHTML = '<option value="">— load saved prompt —</option>';
+  function renderSpSelect() {
+    const active = currentSystemPromptId;
+    spSelect.innerHTML = '<option value="">— none —</option>';
     for (const p of getSavedPrompts()) {
       const opt = document.createElement('option');
-      opt.value = p.content; opt.textContent = p.name;
-      spPresetSelect.appendChild(opt);
+      opt.value = p.id; opt.textContent = p.name;
+      if (p.id === active) opt.selected = true;
+      spSelect.appendChild(opt);
     }
+    spSelect.classList.toggle('active', !!active);
+  }
+
+  // editing index (-1 = new prompt)
+  let editingSpIdx = -1;
+
+  function openSpEditForm(idx) {
+    const p = getSavedPrompts()[idx];
+    editingSpIdx = idx;
+    spNewName.value    = p.name;
+    spNewContent.value = p.content;
+    spNewForm.classList.remove('hidden');
+    spAddBtn.classList.add('hidden');
+    spNewSave.textContent = 'Update prompt';
+    spNewName.focus();
   }
 
   // ── System prompt ─────────────────────────────────────
-  function toggleSystemPrompt() {
-    const open = spBody.classList.toggle('open');
-    spToggle.classList.toggle('open', open);
-  }
-  function updateSpToggleState() {
-    spToggle.classList.toggle('active', !!spTextarea.value.trim());
-  }
   function resetSystemPrompt() {
-    spTextarea.value = '';
-    spBody.classList.remove('open');
-    spToggle.classList.remove('open', 'active');
-    currentSystemPrompt = '';
+    currentSystemPrompt   = '';
+    currentSystemPromptId = '';
+    renderSpSelect();
   }
-  function setSystemPrompt(text) {
-    currentSystemPrompt = text;
-    spTextarea.value = text;
-    const has = !!text;
-    spBody.classList.toggle('open', has);
-    spToggle.classList.toggle('open', has);
-    spToggle.classList.toggle('active', has);
+  function setSystemPromptById(id) {
+    const p = getSavedPrompts().find(x => x.id === id);
+    if (p) {
+      currentSystemPrompt   = p.content;
+      currentSystemPromptId = p.id;
+    } else {
+      currentSystemPrompt   = '';
+      currentSystemPromptId = '';
+    }
+    renderSpSelect();
   }
 
   // ── Listeners ─────────────────────────────────────────
@@ -425,14 +433,11 @@
     });
     nameBtn.addEventListener('click', submitName);
     nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitName(); });
-    spToggle.addEventListener('click', toggleSystemPrompt);
-    spTextarea.addEventListener('input', updateSpToggleState);
-    spPresetSelect.addEventListener('change', () => {
-      if (!spPresetSelect.value) return;
-      setSystemPrompt(spPresetSelect.value);
-      spPresetSelect.value = '';
-    });
+    spSelect.addEventListener('change', () => setSystemPromptById(spSelect.value));
     spAddBtn.addEventListener('click', () => {
+      editingSpIdx = -1;
+      spNewName.value = ''; spNewContent.value = '';
+      spNewSave.textContent = 'Save prompt';
       spNewForm.classList.remove('hidden');
       spAddBtn.classList.add('hidden');
       spNewName.focus();
@@ -441,16 +446,27 @@
       spNewForm.classList.add('hidden');
       spAddBtn.classList.remove('hidden');
       spNewName.value = ''; spNewContent.value = '';
+      editingSpIdx = -1;
+      spNewSave.textContent = 'Save prompt';
     });
     spNewSave.addEventListener('click', () => {
       const name    = spNewName.value.trim();
       const content = spNewContent.value.trim();
       if (!name || !content) { (name ? spNewContent : spNewName).focus(); return; }
       const prompts = getSavedPrompts();
-      prompts.push({ id: String(Date.now()), name, content });
+      if (editingSpIdx >= 0) {
+        const existingId = prompts[editingSpIdx].id;
+        prompts[editingSpIdx] = { id: existingId, name, content };
+        // If this prompt is active, refresh currentSystemPrompt
+        if (currentSystemPromptId === existingId) currentSystemPrompt = content;
+      } else {
+        prompts.push({ id: String(Date.now()), name, content });
+      }
       persistSavedPrompts(prompts);
+      editingSpIdx = -1;
+      spNewSave.textContent = 'Save prompt';
       renderSpSavedList();
-      renderSpPresetSelect();
+      renderSpSelect();
       spNewForm.classList.add('hidden');
       spAddBtn.classList.remove('hidden');
       spNewName.value = ''; spNewContent.value = '';
@@ -561,7 +577,7 @@
     if (isStreaming) return;
     messages = item.messages;
     currentConvId = item.id;
-    setSystemPrompt(item.systemPrompt || '');
+    setSystemPromptById(item.systemPromptId || '');
     messagesEl.innerHTML = '';
     for (const msg of messages) {
       if (msg.role === 'user') {
@@ -599,7 +615,7 @@
     const stripped = messages.map(({ images, ...rest }) => rest);
     const existing = history.find(h => h.id === id);
     const title = existing?.title || stripped[0]?.content?.trim().slice(0, 72) || 'Image conversation';
-    const entry = { id, title, timestamp: Date.now(), model: activeModel, messages: stripped, systemPrompt: currentSystemPrompt };
+    const entry = { id, title, timestamp: Date.now(), model: activeModel, messages: stripped, systemPrompt: currentSystemPrompt, systemPromptId: currentSystemPromptId };
     const idx = history.findIndex(h => h.id === id);
     if (idx >= 0) history[idx] = entry; else history.unshift(entry);
     try {
@@ -757,9 +773,6 @@
     sendBtn.style.display = 'none';
     stopBtn.style.display  = 'flex';
     streamText = '';
-
-    // Capture system prompt at send time
-    currentSystemPrompt = spTextarea.value.trim();
 
     const contextMsgs = messages.slice(-activeContextSize);
     const systemContent = currentSystemPrompt

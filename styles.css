@@ -636,43 +636,24 @@ footer  { padding-left:  max(16px, env(safe-area-inset-left));
 /* ── System prompt ──────────────────────────────────── */
 #system-prompt-section { margin-bottom: 6px; }
 
-.sp-toggle {
-  display: flex; align-items: center; gap: 6px;
-  background: none; border: none;
+.sp-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.sp-label {
+  font-size: 11px; font-weight: 600; color: var(--text-3);
+  letter-spacing: .4px; text-transform: uppercase;
+  white-space: nowrap; flex-shrink: 0;
+}
+.sp-select {
+  flex: 1; background: var(--glass); border: 1px solid var(--border);
+  border-radius: 10px; padding: 6px 10px;
   color: var(--text-3); font-size: 12px; font-family: inherit;
-  cursor: pointer; padding: 4px 2px;
-  transition: color .15s;
-}
-.sp-toggle:hover { color: var(--text-2); }
-.sp-toggle.active { color: var(--accent); }
-.sp-toggle svg { transition: transform .2s; flex-shrink: 0; }
-.sp-toggle.open svg { transform: rotate(180deg); }
-
-.sp-body { display: none; margin-top: 6px; }
-.sp-body.open { display: block; }
-
-.sp-textarea {
-  width: 100%;
-  background: var(--glass); border: 1px solid var(--border);
-  border-radius: 12px; padding: 10px 13px;
-  color: var(--text); font-size: 13px; font-family: inherit;
-  resize: none; outline: none; line-height: 1.5;
-  transition: border-color .2s;
-}
-.sp-textarea:focus { border-color: rgba(10,132,255,.3); }
-.sp-textarea::placeholder { color: var(--text-3); }
-
-/* ── Preset select (chat footer) ──────────────────────── */
-.sp-select-row { margin-bottom: 6px; }
-.sp-preset-select {
-  width: 100%; background: var(--glass); border: 1px solid var(--border);
-  border-radius: 10px; padding: 7px 10px;
-  color: var(--text-2); font-size: 12px; font-family: inherit;
   outline: none; cursor: pointer; -webkit-appearance: none; appearance: none;
-  transition: border-color .2s;
+  transition: border-color .2s, color .2s;
 }
-.sp-preset-select:focus { border-color: rgba(10,132,255,.3); }
-.sp-preset-select option { background: #0e0e18; color: var(--text); }
+.sp-select:focus { border-color: rgba(10,132,255,.3); }
+.sp-select.active { color: var(--accent); border-color: rgba(10,132,255,.25); }
+.sp-select option { background: #0e0e18; color: var(--text); }
 
 /* ── Saved prompts list (settings panel) ──────────────── */
 .sp-saved-empty { font-size: 12px; color: var(--text-3); padding: 4px 0 8px; }
@@ -693,6 +674,14 @@ footer  { padding-left:  max(16px, env(safe-area-inset-left));
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; transition: background .15s, color .15s, border-color .15s;
 }
+.sp-saved-edit {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%;
+  background: transparent; border: 1px solid transparent;
+  color: var(--text-3); font-size: 12px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+}
+.sp-saved-edit:hover { background: var(--glass-hi); border-color: var(--border-hi); color: var(--accent); }
 .sp-saved-del:hover { background: var(--glass-hi); border-color: var(--border-hi); color: var(--text); }
 .sp-new-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
 .sp-new-content { resize: vertical; min-height: 80px; font-size: 13px; line-height: 1.5; }
