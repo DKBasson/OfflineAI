@@ -8,9 +8,13 @@ import httpx
 app = FastAPI(title="OfflineAI")
 
 OLLAMA     = "http://localhost:11434"
-INDEX      = Path(__file__).parent / "index.html"
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_BODY   = 50 * 1024 * 1024  # 50 MB
+
+# Cache static files at startup
+_BASE = Path(__file__).parent
+_INDEX_HTML = (_BASE / "index.html").read_text(encoding="utf-8")
+_STYLES_CSS = (_BASE / "styles.css").read_text(encoding="utf-8")
 
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -26,7 +30,13 @@ async def limit_body_size(request: Request, call_next):
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    return HTMLResponse(INDEX.read_text(encoding="utf-8"))
+    return HTMLResponse(_INDEX_HTML)
+
+
+@app.get("/styles.css")
+async def styles():
+    from fastapi.responses import Response
+    return Response(_STYLES_CSS, media_type="text/css")
 
 
 @app.get("/api/models")
