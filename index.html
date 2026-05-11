@@ -23,21 +23,22 @@
     <div class="settings-body">
       <div class="settings-group">
         <label class="settings-label">Your name</label>
+        <span class="settings-hint">Shown in greetings and used as your avatar initial in the chat.</span>
         <input class="settings-input" id="settings-name" type="text" placeholder="Enter your name…" maxlength="32">
       </div>
       <div class="settings-group">
         <label class="settings-label">Model</label>
-        <span class="settings-hint">Fetched from Ollama — run <code>ollama pull &lt;name&gt;</code> to add models</span>
+        <span class="settings-hint">The Ollama model used for all new messages. To add models, run <code>ollama pull &lt;name&gt;</code> in your terminal. Larger models are slower but more capable.</span>
         <select class="settings-select" id="settings-model"></select>
       </div>
       <div class="settings-group">
         <label class="settings-label">Context window</label>
-        <span class="settings-hint">Max messages sent per request (4–100)</span>
+        <span class="settings-hint">How many of your most recent messages are sent with each request. Higher values give the model more memory of the conversation but use more tokens. Range: 4–100.</span>
         <input class="settings-input" id="settings-context" type="number" min="4" max="100" step="1">
       </div>
       <div class="settings-group">
         <label class="settings-label">System prompts</label>
-        <span class="settings-hint">Saved prompts you can load into any conversation</span>
+        <span class="settings-hint">Reusable instruction sets that shape how the AI behaves — e.g. tone, role, or language. Select one per conversation from the footer bar. These are enforced as non-negotiable rules.</span>
         <div id="sp-saved-list"></div>
         <div id="sp-new-form" class="sp-new-form hidden">
           <input class="settings-input" id="sp-new-name" type="text" placeholder="Prompt name…" maxlength="48">
@@ -50,6 +51,8 @@
         <button class="sp-add-btn" id="sp-add-btn">+ Add prompt</button>
       </div>
       <div class="settings-group settings-group--danger">
+        <label class="settings-label">Danger zone</label>
+        <span class="settings-hint">Permanently deletes all saved conversations. Your system prompts and settings are not affected.</span>
         <button class="settings-danger-btn" id="clear-history-btn">Clear all history</button>
       </div>
     </div>
