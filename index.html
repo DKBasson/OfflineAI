@@ -500,7 +500,7 @@
       footer { padding-top: 6px; }
       .footer-hint { display: none; }
       .input-wrap { border-radius: 18px; padding: 7px 7px 7px 13px; }
-      #input { font-size: 15px; /* avoid iOS auto-zoom (must be ≥16px or handled) */ }
+      #input { font-size: 16px; }
 
       /* Image previews tighter */
       .img-thumb img { width: 48px; height: 48px; }
@@ -584,6 +584,7 @@
   // ── Config ────────────────────────────────────────────
   const DEFAULT_MODEL = 'gemma4:e4b';
   const MAX_HISTORY   = 60;
+  const MAX_CONTEXT   = 20; // max messages sent per request (prevents context-window overflow)
 
   // Configure marked once at startup
   marked.use({ breaks: true, gfm: true });
@@ -759,8 +760,9 @@
     currentConvId = id;
     // Strip base64 images to avoid localStorage bloat
     const stripped = messages.map(({ images, ...rest }) => rest);
-    const fallback = stripped[0]?.content?.trim().slice(0, 72) || 'Image conversation';
-    const entry = { id, title: fallback, timestamp: Date.now(), model: DEFAULT_MODEL, messages: stripped };
+    const existing = history.find(h => h.id === id);
+    const title = existing?.title || stripped[0]?.content?.trim().slice(0, 72) || 'Image conversation';
+    const entry = { id, title, timestamp: Date.now(), model: DEFAULT_MODEL, messages: stripped };
     const idx = history.findIndex(h => h.id === id);
     if (idx >= 0) history[idx] = entry; else history.unshift(entry);
     try {
@@ -774,6 +776,7 @@
         const i = h.findIndex(x => x.id === id);
         if (i >= 0) { h[i].title = title; }
         try { localStorage.setItem('offlineai_history', JSON.stringify(h)); } catch {}
+        if (sidebar.classList.contains('open')) renderHistoryList();
       });
     }
   }
@@ -872,9 +875,10 @@
     stopBtn.style.display  = 'flex';
     streamText = '';
 
+    const contextMsgs = messages.slice(-MAX_CONTEXT);
     const payload = {
       model: DEFAULT_MODEL,
-      messages: messages.map(m => ({
+      messages: contextMsgs.map(m => ({
         role: m.role, content: m.content,
         ...(m.images ? { images: m.images } : {})
       })),
@@ -890,6 +894,10 @@
         signal:  abortCtrl.signal
       });
 
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => resp.statusText);
+        throw new Error(`Server error ${resp.status}: ${errText}`);
+      }
       assistantRow.querySelector('.thinking').remove();
       streamEl = document.createElement('div');
       streamEl.className = 'msg-text streaming';
@@ -910,9 +918,9 @@
           try {
             const d = JSON.parse(line);
             if (d.error) {
-              streamText = `⚠️ ${d.error}`;
-              streamEl.textContent = streamText;
+              streamEl.textContent = `⚠️ ${d.error}`;
               streamEl.classList.add('error');
+              streamText = '';
               return;
             }
             if (d.message?.content) {
@@ -952,7 +960,7 @@
         streamEl.querySelectorAll('pre').forEach(addCopyBtn);
         messages.push({ role: 'assistant', content: streamText });
         saveToHistory();
-      } else if (streamText) {
+      } else if (streamText && !streamEl?.classList.contains('error')) {
         messages.push({ role: 'assistant', content: streamText });
         saveToHistory();
       }
