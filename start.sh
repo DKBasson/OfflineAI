@@ -4,6 +4,19 @@ set -e
 SCRIPT_DIR="${0:A:h}"
 cd "$SCRIPT_DIR"
 
+if [[ ! -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
+  echo "✖ Virtual environment not found. Run ./install.sh first."
+  exit 1
+fi
+
+: ${OFFLINEAI_HOST:=127.0.0.1}
+: ${OFFLINEAI_PORT:=8080}
+if [[ "$OFFLINEAI_HOST" == "0.0.0.0" || "$OFFLINEAI_HOST" == "::" ]]; then
+  : ${OFFLINEAI_TOKEN:=$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')}
+fi
+export OFFLINEAI_HOST OFFLINEAI_PORT
+[[ -n "${OFFLINEAI_TOKEN:-}" ]] && export OFFLINEAI_TOKEN
+
 # ── Ollama ────────────────────────────────────────────────────────
 if ! pgrep -x "ollama" > /dev/null 2>&1; then
   echo "▶ Starting Ollama..."
@@ -21,28 +34,41 @@ fi
 # ── FastAPI app ────────────────────────────────────────────────────
 echo "▶ Starting OfflineAI..."
 source "$SCRIPT_DIR/.venv/bin/activate"
-python3 "$SCRIPT_DIR/app.py" &
+python "$SCRIPT_DIR/app.py" &
 APP_PID=$!
 
 # Wait for the server to be ready (up to 5 s)
 for i in {1..10}; do
   sleep 0.5
-  curl -s http://127.0.0.1:8080/ > /dev/null 2>&1 && break
+  curl -s "http://127.0.0.1:${OFFLINEAI_PORT}/" > /dev/null 2>&1 && break
 done
 
-# Resolve LAN IP (UDP trick — no data sent)
-LAN_IP=$(python3 -c "
+echo "✔ App running"
+LOCAL_URL="http://127.0.0.1:${OFFLINEAI_PORT}"
+[[ -n "${OFFLINEAI_TOKEN:-}" ]] && LOCAL_URL="${LOCAL_URL}?token=${OFFLINEAI_TOKEN}"
+echo "   Local:   ${LOCAL_URL}"
+if [[ "$OFFLINEAI_HOST" == "0.0.0.0" || "$OFFLINEAI_HOST" == "::" ]]; then
+  # Resolve LAN IP (UDP trick; no payload is sent)
+  LAN_IP=$(python -c "
 import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.connect(('8.8.8.8', 80))
 print(s.getsockname()[0])
 s.close()
 " 2>/dev/null || echo "127.0.0.1")
-echo "✔ App running"
-echo "   Local:   http://127.0.0.1:8080"
-echo "   Network: http://${LAN_IP}:8080"
+  NETWORK_URL="http://${LAN_IP}:${OFFLINEAI_PORT}"
+  [[ -n "${OFFLINEAI_TOKEN:-}" ]] && NETWORK_URL="${NETWORK_URL}?token=${OFFLINEAI_TOKEN}"
+  echo "   Network: ${NETWORK_URL}"
+  [[ -n "${OFFLINEAI_TOKEN:-}" ]] && echo "   Token:   ${OFFLINEAI_TOKEN}"
+else
+  echo "   Network: disabled (set OFFLINEAI_HOST=0.0.0.0 to expose)"
+fi
 
-open "http://127.0.0.1:8080"
+if command -v open > /dev/null 2>&1; then
+  open "$LOCAL_URL"
+elif command -v xdg-open > /dev/null 2>&1; then
+  xdg-open "$LOCAL_URL" > /dev/null 2>&1 || true
+fi
 
 echo "   Press Ctrl+C to stop."
 

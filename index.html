@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>OfflineAI</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20260513-2">
   <link rel="stylesheet" href="/static/github-dark.min.css">
   <script src="/static/marked.min.js"></script>
   <script src="/static/dompurify.min.js"></script>
@@ -21,45 +21,139 @@
       <button class="sidebar-close" id="settings-close-btn">✕</button>
     </div>
     <div class="settings-body">
-      <div class="settings-group">
-        <label class="settings-label">Your name</label>
-        <span class="settings-hint">Shown in greetings and used as your avatar initial in the chat.</span>
-        <input class="settings-input" id="settings-name" type="text" placeholder="Enter your name…" maxlength="32">
-      </div>
-      <div class="settings-group">
-        <label class="settings-label">Model</label>
-        <span class="settings-hint">The Ollama model used for all new messages. To add models, run <code>ollama pull &lt;name&gt;</code> in your terminal. Larger models are slower but more capable.</span>
-        <select class="settings-select" id="settings-model"></select>
-        <div class="pull-row">
-          <input class="settings-input pull-input" id="pull-model-input" type="text" placeholder="Pull a new model name…" autocomplete="off" spellcheck="false">
-          <button class="pull-btn" id="pull-btn">Pull</button>
+      <section class="settings-section">
+        <div class="settings-section-title">Profile</div>
+        <div class="settings-group">
+          <label class="settings-label">Your name</label>
+          <span class="settings-hint">Shown in greetings and used as your avatar initial in the chat.</span>
+          <input class="settings-input" id="settings-name" type="text" placeholder="Enter your name…" maxlength="32">
         </div>
-        <div id="pull-status" class="pull-status hidden"></div>
-      </div>
-      <div class="settings-group">
-        <label class="settings-label">Context window</label>
-        <span class="settings-hint">How many of your most recent messages are sent with each request. Higher values give the model more memory of the conversation but use more tokens. Range: 4–100.</span>
-        <input class="settings-input" id="settings-context" type="number" min="4" max="100" step="1">
-      </div>
-      <div class="settings-group">
-        <label class="settings-label">System prompts</label>
-        <span class="settings-hint">Reusable instruction sets that shape how the AI behaves — e.g. tone, role, or language. Select one per conversation from the footer bar. These are enforced as non-negotiable rules.</span>
-        <div id="sp-saved-list"></div>
-        <div id="sp-new-form" class="sp-new-form hidden">
-          <input class="settings-input" id="sp-new-name" type="text" placeholder="Prompt name…" maxlength="48">
-          <textarea class="settings-input sp-new-content" id="sp-new-content" placeholder="Prompt instructions…" rows="4"></textarea>
-          <div class="sp-new-actions">
-            <button class="sp-new-cancel-btn" id="sp-new-cancel">Cancel</button>
-            <button class="sp-new-save-btn" id="sp-new-save">Save prompt</button>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">Models & context</div>
+        <div class="settings-group">
+          <label class="settings-label">Download models</label>
+          <span class="settings-hint">Pull an Ollama model by name.</span>
+          <div class="pull-row">
+            <input class="settings-input pull-input" id="pull-model-input" type="text" placeholder="Model name to download…" autocomplete="off" spellcheck="false">
+            <button class="pull-btn" id="pull-btn">Pull</button>
+          </div>
+          <div id="pull-status" class="pull-status hidden"></div>
+        </div>
+        <div class="settings-group">
+          <label class="settings-label">Downloaded models</label>
+          <div id="downloaded-models-list" class="downloaded-models-list">
+            <div class="downloaded-models-empty">Checking models…</div>
           </div>
         </div>
-        <button class="sp-add-btn" id="sp-add-btn">+ Add prompt</button>
-      </div>
-      <div class="settings-group settings-group--danger">
-        <label class="settings-label">Danger zone</label>
-        <span class="settings-hint">Permanently deletes all saved conversations. Your system prompts and settings are not affected.</span>
-        <button class="settings-danger-btn" id="clear-history-btn">Clear all history</button>
-      </div>
+        <div class="settings-group">
+          <label class="settings-label label-with-tip">
+            <span>Context window</span>
+            <span class="settings-tip" tabindex="0" role="note" aria-label="How many recent chat messages are included with each request. Higher values improve memory but use more tokens." data-tip="How many recent chat messages are included with each request. Higher values improve memory but use more tokens.">i</span>
+          </label>
+          <span class="settings-hint">Recent messages sent with each request. Range: 4–100.</span>
+          <input class="settings-input" id="settings-context" type="number" min="4" max="100" step="1">
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">Generation</div>
+        <span class="settings-hint">Tune how replies are sampled. Set token fields to 0 to use Ollama defaults.</span>
+        <div class="settings-grid">
+          <label class="settings-field">
+            <span class="field-row">
+              <span class="field-label">Temperature</span>
+              <span class="settings-tip" tabindex="0" role="note" aria-label="Controls randomness. Lower values are more predictable; higher values are more creative and less consistent." data-tip="Controls randomness. Lower values are more predictable; higher values are more creative and less consistent.">i</span>
+            </span>
+            <input class="settings-input" id="settings-temperature" type="number" min="0" max="2" step="0.1" inputmode="decimal">
+          </label>
+          <label class="settings-field">
+            <span class="field-row">
+              <span class="field-label">Top P</span>
+              <span class="settings-tip" tabindex="0" role="note" aria-label="Limits sampling to the most likely tokens. Lower values make answers tighter; higher values allow more variety." data-tip="Limits sampling to the most likely tokens. Lower values make answers tighter; higher values allow more variety.">i</span>
+            </span>
+            <input class="settings-input" id="settings-top-p" type="number" min="0.1" max="1" step="0.05" inputmode="decimal">
+          </label>
+          <label class="settings-field">
+            <span class="field-row">
+              <span class="field-label">Max reply tokens</span>
+              <span class="settings-tip" tabindex="0" role="note" aria-label="Caps one assistant reply. Use 0 to let Ollama choose the model default." data-tip="Caps one assistant reply. Use 0 to let Ollama choose the model default.">i</span>
+            </span>
+            <input class="settings-input" id="settings-max-tokens" type="number" min="0" max="8192" step="64" inputmode="numeric">
+          </label>
+          <label class="settings-field">
+            <span class="field-row">
+              <span class="field-label">Model context tokens</span>
+              <span class="settings-tip" tabindex="0" role="note" aria-label="Ollama num_ctx. Higher values let the model consider more tokens but can use much more memory." data-tip="Ollama num_ctx. Higher values let the model consider more tokens but can use much more memory.">i</span>
+            </span>
+            <input class="settings-input" id="settings-num-ctx" type="number" min="0" max="32768" step="512" inputmode="numeric">
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">Runtime</div>
+        <div class="settings-group">
+          <label class="settings-label">Local runtime</label>
+          <div id="model-health" class="model-health">
+            <div class="health-row"><span>Ollama</span><strong>Checking</strong></div>
+          </div>
+          <button class="settings-secondary-btn" id="restart-ollama-btn" type="button" title="Stop and start the local Ollama runtime.">Restart Ollama</button>
+          <div id="ollama-restart-status" class="pull-status hidden"></div>
+          <button class="settings-secondary-btn" id="reset-tokens-btn" type="button" title="Reset the local cumulative input/output token counter.">Reset token counter</button>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">Local data</div>
+        <span class="settings-hint">Controls browser-only conversation storage.</span>
+        <div class="settings-grid">
+          <label class="settings-field">
+            <span class="field-row">
+              <span class="field-label">Saved chats</span>
+              <span class="settings-tip" tabindex="0" role="note" aria-label="Maximum conversations kept on this device. Lowering this trims older chats after saving." data-tip="Maximum conversations kept on this device. Lowering this trims older chats after saving.">i</span>
+            </span>
+            <input class="settings-input" id="settings-history-limit" type="number" min="10" max="200" step="10" inputmode="numeric">
+          </label>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">Behavior</div>
+        <label class="settings-check">
+          <input id="settings-auto-title" type="checkbox">
+          <span class="check-label">Auto-title new conversations after the first reply</span>
+          <span class="settings-tip" tabindex="0" role="note" aria-label="When enabled, OfflineAI asks the selected model for a short title once a new chat has a user message and a reply." data-tip="When enabled, OfflineAI asks the selected model for a short title once a new chat has a user message and a reply.">i</span>
+        </label>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">Prompts</div>
+        <div class="settings-group">
+          <label class="settings-label">System prompts</label>
+          <span class="settings-hint">Reusable instruction sets. Star one to use it as the default for new conversations.</span>
+          <div id="sp-saved-list"></div>
+          <div id="sp-new-form" class="sp-new-form hidden">
+            <input class="settings-input" id="sp-new-name" type="text" placeholder="Prompt name…" maxlength="48">
+            <textarea class="settings-input sp-new-content" id="sp-new-content" placeholder="Prompt instructions…" rows="4"></textarea>
+            <div class="sp-new-actions">
+              <button class="sp-new-cancel-btn" id="sp-new-cancel">Cancel</button>
+              <button class="sp-new-save-btn" id="sp-new-save">Save prompt</button>
+            </div>
+          </div>
+          <button class="sp-add-btn" id="sp-add-btn">+ Add prompt</button>
+        </div>
+      </section>
+
+      <section class="settings-section settings-section--danger">
+        <div class="settings-section-title">Danger zone</div>
+        <div class="settings-group settings-group--danger">
+          <label class="settings-label">Clear conversations</label>
+          <span class="settings-hint">Permanently deletes all saved conversations. Your system prompts and settings are not affected.</span>
+          <button class="settings-danger-btn" id="clear-history-btn">Clear all history</button>
+        </div>
+      </section>
     </div>
     <button class="settings-save-btn" id="settings-save-btn">Save settings</button>
   </div>
@@ -68,6 +162,9 @@
     <div class="sidebar-header">
       <span class="sidebar-title">History</span>
       <button class="sidebar-close" id="sidebar-close-btn">✕</button>
+    </div>
+    <div class="history-search-wrap">
+      <input id="history-search" type="search" placeholder="Search conversations…" autocomplete="off" spellcheck="false">
     </div>
     <div id="history-list"></div>
     <button class="sidebar-new-btn" id="new-chat-btn">+ New Chat</button>
@@ -90,6 +187,11 @@
     <div id="token-counter" class="token-counter" title="Total tokens used">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       <span id="token-count">0</span>
+    </div>
+    <div id="connection-pill" class="connection-pill checking" tabindex="0" aria-describedby="connection-tooltip">
+      <span class="conn-dot"></span>
+      <span id="connection-text">Checking</span>
+      <span id="connection-tooltip" class="connection-tooltip" role="tooltip">Checking Ollama status</span>
     </div>
     <button class="hdr-icon-btn" id="settings-btn" title="Settings">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -122,7 +224,11 @@
 
   <footer>
     <div id="system-prompt-section">
-      <div class="sp-row">
+      <div class="sp-row sp-row--model">
+        <span class="sp-label">Model</span>
+        <select id="chat-model-select" class="sp-select chat-model-select"></select>
+      </div>
+      <div class="sp-row sp-row--prompt">
         <span class="sp-label">System prompt</span>
         <select id="sp-select" class="sp-select">
           <option value="">— none —</option>
@@ -179,27 +285,8 @@
         <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>K</kbd></div><span>New chat</span></div>
         <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>L</kbd></div><span>Toggle history</span></div>
         <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>E</kbd></div><span>Export chat</span></div>
-        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>/</kbd></div><span>Focus message input</span></div>
-      </div>
-    </div>
-  </div>
-
-  <div id="shortcuts-modal" class="hidden">
-    <div class="shortcuts-card">
-      <div class="shortcuts-hdr">
-        <span class="shortcuts-title">Keyboard Shortcuts</span>
-        <button class="sidebar-close" id="shortcuts-close-btn">✕</button>
-      </div>
-      <div class="shortcuts-grid">
-        <div class="sc-row"><div class="sc-keys"><kbd>Enter</kbd></div><span>Send message</span></div>
-        <div class="sc-row"><div class="sc-keys"><kbd>Shift</kbd> + <kbd>Enter</kbd></div><span>New line</span></div>
-        <div class="sc-row"><div class="sc-keys"><kbd>Esc</kbd></div><span>Close panels</span></div>
-        <div class="sc-row"><div class="sc-keys"><kbd>?</kbd></div><span>Show shortcuts</span></div>
-        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>K</kbd></div><span>New chat</span></div>
-        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>L</kbd></div><span>Toggle history</span></div>
-        <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>E</kbd></div><span>Export chat</span></div>
         <div class="sc-row"><div class="sc-keys"><kbd class="sc-mod">⌘</kbd> + <kbd>/</kbd></div><span>Focus input</span></div>
-        <div class="sc-row"><div class="sc-keys"><kbd>dblclick</kbd></div><span>Rename conversation</span></div>
+        <div class="sc-row"><div class="sc-keys"><kbd>Shift</kbd> + <kbd class="sc-mod">⌘</kbd> + <kbd>F</kbd></div><span>Focus mode</span></div>
       </div>
     </div>
   </div>
@@ -214,1004 +301,7 @@
     </div>
   </div>
 
-<script>
-  // ── Config / Defaults ─────────────────────────────────
-  const FALLBACK_MODEL = 'gemma4:e4b';
-  const SETTINGS_KEY   = 'offlineai_settings';
-  const PROMPTS_KEY    = 'offlineai_prompts';
-  const TOKENS_KEY     = 'offlineai_tokens';
-  const MAX_HISTORY    = 60;
-
-  // File-type constants
-  const IMAGE_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp';
-  const TEXT_ACCEPT  = '.txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.csv,.xml,.yaml,.yml,.sh,.bash,.html,.css,.java,.c,.cpp,.h,.rs,.go,.rb,.php,.swift,.kt,.sql,.toml,.ini,.conf,.env,.log';
-  // Capability cache: modelName → { vision: bool }
-  const modelCaps = {};
-
-  // Configure marked once at startup
-  marked.use({ breaks: true, gfm: true });
-
-  // ── Settings ──────────────────────────────────────────
-  function getSettings() {
-    try {
-      return { model: FALLBACK_MODEL, contextSize: 20, username: '',
-               ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
-    } catch { return { model: FALLBACK_MODEL, contextSize: 20, username: '' }; }
-  }
-  function persistSettings(s) {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
-  }
-
-  // ── Token tracking ────────────────────────────────────
-  function getTokenTotals() {
-    try { return JSON.parse(localStorage.getItem(TOKENS_KEY) || '{"input":0,"output":0}'); }
-    catch { return { input: 0, output: 0 }; }
-  }
-  function addTokens(inputToks, outputToks) {
-    const t = getTokenTotals();
-    t.input  += inputToks  || 0;
-    t.output += outputToks || 0;
-    try { localStorage.setItem(TOKENS_KEY, JSON.stringify(t)); } catch {}
-    renderTokenCounter(t);
-  }
-  function fmtTokens(n) {
-    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
-    if (n >= 1_000)     return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'k';
-    return String(n);
-  }
-  function renderTokenCounter(t) {
-    const total = (t.input || 0) + (t.output || 0);
-    tokenCountEl.textContent = fmtTokens(total);
-    tokenCounterEl.title = `Tokens used\nInput: ${t.input.toLocaleString()}\nOutput: ${t.output.toLocaleString()}\nTotal: ${total.toLocaleString()}`;
-  }
-
-  // ── Active config (loaded from settings at init) ──────
-  let activeModel       = FALLBACK_MODEL;
-  let activeContextSize = 20;
-  let activeUsername    = '';
-
-  // ── State ─────────────────────────────────────────────
-  let messages            = [];
-  let pendingImages       = [];
-  let pendingFiles        = []; // { name, content (text) }
-  let isStreaming         = false;
-  let abortCtrl           = null;
-  let streamEl            = null;
-  let streamText          = '';
-  let currentConvId       = null;
-  let currentSystemPrompt   = '';
-  let currentSystemPromptId = '';
-
-  // ── DOM ───────────────────────────────────────────────
-  const messagesEl    = document.getElementById('messages');
-  const inputEl       = document.getElementById('input');
-  const sendBtn       = document.getElementById('send-btn');
-  const stopBtn       = document.getElementById('stop-btn');
-  const attachBtn     = document.getElementById('attach-btn');
-  const fileInput     = document.getElementById('file-input');
-  const previewsEl    = document.getElementById('img-previews');
-  const clearBtn      = document.getElementById('clear-btn');
-  const historyBtn    = document.getElementById('history-btn');
-  const sidebar       = document.getElementById('sidebar');
-  const sidebarOver   = document.getElementById('sidebar-overlay');
-  const sidebarClose  = document.getElementById('sidebar-close-btn');
-  const newChatBtn    = document.getElementById('new-chat-btn');
-  const historyList   = document.getElementById('history-list');
-  const lightbox      = document.getElementById('lightbox');
-  const lightboxImg   = document.getElementById('lightbox-img');
-  const settingsBtn   = document.getElementById('settings-btn');
-  const settingsPanel = document.getElementById('settings-panel');
-  const settingsOver  = document.getElementById('settings-overlay');
-  const settingsClose = document.getElementById('settings-close-btn');
-  const settingsSave  = document.getElementById('settings-save-btn');
-  const settingsName  = document.getElementById('settings-name');
-  const settingsModel = document.getElementById('settings-model');
-  const settingsCtx   = document.getElementById('settings-context');
-  const clearHistBtn  = document.getElementById('clear-history-btn');
-  const nameModal     = document.getElementById('name-modal');
-  const nameInput     = document.getElementById('name-modal-input');
-  const nameBtn       = document.getElementById('name-modal-btn');
-  const spSelect        = document.getElementById('sp-select');
-  const tokenCountEl    = document.getElementById('token-count');
-  const tokenCounterEl  = document.getElementById('token-counter');
-  const spSavedList     = document.getElementById('sp-saved-list');
-  const spAddBtn        = document.getElementById('sp-add-btn');
-  const spNewForm       = document.getElementById('sp-new-form');
-  const spNewName       = document.getElementById('sp-new-name');
-  const spNewContent    = document.getElementById('sp-new-content');
-  const spNewSave       = document.getElementById('sp-new-save');
-  const spNewCancel     = document.getElementById('sp-new-cancel');
-  const pullInput       = document.getElementById('pull-model-input');
-  const pullBtn         = document.getElementById('pull-btn');
-  const pullStatus      = document.getElementById('pull-status');
-  const exportBtn       = document.getElementById('export-btn');
-  const shortcutsBtn    = document.getElementById('shortcuts-btn');
-  const shortcutsModal  = document.getElementById('shortcuts-modal');
-  const shortcutsClose  = document.getElementById('shortcuts-close-btn');
-
-  // Detect modifier key for display
-  const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
-  if (!isMac) document.querySelectorAll('.sc-mod').forEach(el => el.textContent = 'Ctrl');
-
-  // ── Init ──────────────────────────────────────────────
-  async function init() {
-    const s = getSettings();
-    activeModel       = s.model;
-    activeContextSize = s.contextSize;
-    activeUsername    = s.username;
-    showWelcome();
-    setupListeners();
-    renderSpSelect();
-    renderTokenCounter(getTokenTotals());
-    updateAttachForModel(activeModel);
-    if (!activeUsername) {
-      showNameModal();
-    } else {
-      inputEl.focus();
-    }
-  }
-
-  // ── Name modal ────────────────────────────────────────
-  function showNameModal() {
-    nameModal.classList.remove('hidden');
-    setTimeout(() => nameInput.focus(), 50);
-  }
-  function submitName() {
-    const name = nameInput.value.trim();
-    if (!name) { nameInput.focus(); return; }
-    activeUsername = name;
-    const s = getSettings();
-    s.username = name;
-    persistSettings(s);
-    nameModal.classList.add('hidden');
-    document.getElementById('welcome')?.remove();
-    showWelcome();
-    inputEl.focus();
-  }
-
-  // ── Model capabilities ────────────────────────────────
-  async function fetchModelCaps(model) {
-    if (modelCaps[model]) return modelCaps[model];
-    try {
-      const r    = await fetch('/api/show', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: model }) });
-      const data = await r.json();
-      // Newer Ollama: data.capabilities = ["completion","tools","vision",...]
-      // Older Ollama: data.details.families includes "clip"
-      const caps = data.capabilities || [];
-      const fams = data.details?.families || [];
-      const vision = caps.includes('vision') || fams.includes('clip');
-      modelCaps[model] = { vision };
-    } catch {
-      modelCaps[model] = { vision: false };
-    }
-    return modelCaps[model];
-  }
-
-  async function updateAttachForModel(model) {
-    const caps = await fetchModelCaps(model);
-    fileInput.accept = caps.vision
-      ? IMAGE_ACCEPT + ',' + TEXT_ACCEPT
-      : TEXT_ACCEPT;
-  }
-
-  // ── Settings panel ────────────────────────────────────
-  async function openSettings() {
-    const s = getSettings();
-    settingsName.value = s.username;
-    settingsCtx.value  = s.contextSize;
-    settingsModel.innerHTML = '';
-    try {
-      const r    = await fetch('/api/models');
-      const data = await r.json();
-      const models = (data.models || []).map(m => m.name);
-      if (!models.includes(s.model)) models.unshift(s.model);
-      for (const name of models) {
-        const opt = document.createElement('option');
-        opt.value = name; opt.textContent = name;
-        if (name === s.model) opt.selected = true;
-        settingsModel.appendChild(opt);
-      }
-    } catch {
-      const opt = document.createElement('option');
-      opt.value = s.model; opt.textContent = s.model; opt.selected = true;
-      settingsModel.appendChild(opt);
-    }
-    renderSpSavedList();
-    renderSpSelect();
-    settingsPanel.classList.add('open');
-    settingsOver.classList.add('open');
-  }
-  function closeSettings() {
-    settingsPanel.classList.remove('open');
-    settingsOver.classList.remove('open');
-  }
-  function saveSettingsUI() {
-    const name  = settingsName.value.trim();
-    const model = settingsModel.value;
-    const ctx   = Math.min(100, Math.max(4, parseInt(settingsCtx.value) || 20));
-    persistSettings({ username: name, model, contextSize: ctx });
-    activeModel       = model;
-    activeContextSize = ctx;
-    if (name !== activeUsername) {
-      activeUsername = name;
-      document.getElementById('welcome')?.remove();
-      showWelcome();
-    }
-    updateAttachForModel(activeModel);
-    closeSettings();
-  }
-
-  // ── Saved prompts ─────────────────────────────────────
-  function getSavedPrompts() {
-    try { return JSON.parse(localStorage.getItem(PROMPTS_KEY) || '[]'); }
-    catch { return []; }
-  }
-  function persistSavedPrompts(arr) {
-    try { localStorage.setItem(PROMPTS_KEY, JSON.stringify(arr)); } catch {}
-  }
-  function renderSpSavedList() {
-    const items = getSavedPrompts();
-    if (!items.length) {
-      spSavedList.innerHTML = '<div class="sp-saved-empty">No saved prompts yet</div>';
-      return;
-    }
-    spSavedList.innerHTML = '';
-    items.forEach((p, i) => {
-      const row = document.createElement('div');
-      row.className = 'sp-saved-item';
-      row.innerHTML = `
-        <span class="sp-saved-name">${escHtml(p.name)}</span>
-        <button class="sp-saved-edit" title="Edit" aria-label="Edit">✎</button>
-        <button class="sp-saved-del" title="Delete" aria-label="Delete">✕</button>`;
-      row.querySelector('.sp-saved-edit').addEventListener('click', () => openSpEditForm(i));
-      row.querySelector('.sp-saved-del').addEventListener('click', () => {
-        const updated = getSavedPrompts().filter((_, j) => j !== i);
-        persistSavedPrompts(updated);
-        if (currentSystemPromptId === p.id) resetSystemPrompt();
-        renderSpSavedList();
-        renderSpSelect();
-      });
-      spSavedList.appendChild(row);
-    });
-  }
-  function renderSpSelect() {
-    const active = currentSystemPromptId;
-    spSelect.innerHTML = '<option value="">— none —</option>';
-    for (const p of getSavedPrompts()) {
-      const opt = document.createElement('option');
-      opt.value = p.id; opt.textContent = p.name;
-      if (p.id === active) opt.selected = true;
-      spSelect.appendChild(opt);
-    }
-    spSelect.classList.toggle('active', !!active);
-  }
-
-  // editing index (-1 = new prompt)
-  let editingSpIdx = -1;
-
-  function openSpEditForm(idx) {
-    const p = getSavedPrompts()[idx];
-    editingSpIdx = idx;
-    spNewName.value    = p.name;
-    spNewContent.value = p.content;
-    spNewForm.classList.remove('hidden');
-    spAddBtn.classList.add('hidden');
-    spNewSave.textContent = 'Update prompt';
-    spNewName.focus();
-  }
-
-  // ── System prompt ─────────────────────────────────────
-  function resetSystemPrompt() {
-    currentSystemPrompt   = '';
-    currentSystemPromptId = '';
-    renderSpSelect();
-  }
-  function setSystemPromptById(id) {
-    const p = getSavedPrompts().find(x => x.id === id);
-    if (p) {
-      currentSystemPrompt   = p.content;
-      currentSystemPromptId = p.id;
-    } else {
-      currentSystemPrompt   = '';
-      currentSystemPromptId = '';
-    }
-    renderSpSelect();
-  }
-
-  // ── Export conversation ───────────────────────────────
-  function exportConversation() {
-    if (!messages.length) return;
-    const history = getHistory();
-    const conv    = history.find(h => h.id === currentConvId);
-    const title   = conv?.title || 'Conversation';
-    const date    = new Date().toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
-    let md = `# ${title}\n\n**Model:** ${activeModel}  \n**Date:** ${date}\n\n---\n\n`;
-    for (const msg of messages) {
-      if (msg.role === 'user')      md += `**You:** ${msg.content}\n\n`;
-      else if (msg.role === 'assistant') md += `**AI:** ${msg.content}\n\n`;
-    }
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = title.replace(/[^a-z0-9]/gi, '_').slice(0, 60) + '.md';
-    a.click(); URL.revokeObjectURL(url);
-  }
-
-  // ── Keyboard shortcuts modal ──────────────────────────
-  function showShortcuts() { shortcutsModal.classList.remove('hidden'); }
-  function closeShortcuts() { shortcutsModal.classList.add('hidden'); }
-
-  // ── Conversation rename ───────────────────────────────
-  function startRename(div, item) {
-    const titleEl = div.querySelector('.history-title');
-    if (!titleEl) return;
-    const orig  = item.title;
-    const input = document.createElement('input');
-    input.className = 'history-rename-input';
-    input.value = orig;
-    titleEl.replaceWith(input);
-    input.focus(); input.select();
-    const save = () => {
-      const newTitle = input.value.trim() || orig;
-      const h = getHistory();
-      const i = h.findIndex(x => x.id === item.id);
-      if (i >= 0) { h[i].title = newTitle; item.title = newTitle; }
-      try { localStorage.setItem('offlineai_history', JSON.stringify(h)); } catch {}
-      const newEl = document.createElement('div');
-      newEl.className = 'history-title'; newEl.title = 'Double-click to rename';
-      newEl.textContent = newTitle;
-      newEl.addEventListener('dblclick', e => { e.stopPropagation(); startRename(div, item); });
-      input.replaceWith(newEl);
-    };
-    input.addEventListener('blur', save);
-    input.addEventListener('keydown', e => {
-      if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
-      if (e.key === 'Escape') { input.value = orig; input.blur(); }
-    });
-  }
-
-  // ── Model pull ────────────────────────────────────────
-  async function pullModel(modelName) {
-    const name = modelName.trim();
-    if (!name) { pullInput.focus(); return; }
-    pullBtn.disabled = true;
-    pullStatus.classList.remove('hidden', 'success', 'error');
-    pullStatus.textContent = 'Connecting…';
-    try {
-      const resp = await fetch('/api/pull', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, stream: true })
-      });
-      const reader = resp.body.getReader();
-      const dec    = new TextDecoder();
-      let   buf    = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n'); buf = lines.pop();
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const d = JSON.parse(line);
-            if (d.error) {
-              pullStatus.textContent = `Error: ${d.error}`;
-              pullStatus.classList.add('error'); return;
-            }
-            if (d.status) {
-              if (d.total && d.completed) {
-                const pct = Math.round((d.completed / d.total) * 100);
-                pullStatus.textContent = `${d.status} — ${pct}%`;
-              } else {
-                pullStatus.textContent = d.status;
-              }
-            }
-          } catch { /* malformed */ }
-        }
-      }
-      pullStatus.textContent = `✓ ${name} ready`;
-      pullStatus.classList.add('success');
-      pullInput.value = '';
-      // Refresh model dropdown
-      const r    = await fetch('/api/models');
-      const data = await r.json();
-      const models = (data.models || []).map(m => m.name);
-      settingsModel.innerHTML = '';
-      const current = getSettings().model;
-      if (!models.includes(current)) models.unshift(current);
-      for (const m of models) {
-        const opt = document.createElement('option');
-        opt.value = m; opt.textContent = m;
-        if (m === current) opt.selected = true;
-        settingsModel.appendChild(opt);
-      }
-    } catch (e) {
-      pullStatus.textContent = `Error: ${e.message}`;
-      pullStatus.classList.add('error');
-    } finally {
-      pullBtn.disabled = false;
-    }
-  }
-
-  // ── Listeners ─────────────────────────────────────────
-  function setupListeners() {
-    sendBtn.addEventListener('click', sendMessage);
-    stopBtn.addEventListener('click', () => abortCtrl?.abort());
-    clearBtn.addEventListener('click', startNewChat);
-    newChatBtn.addEventListener('click', () => { startNewChat(); closeSidebar(); });
-    historyBtn.addEventListener('click', toggleSidebar);
-    sidebarClose.addEventListener('click', closeSidebar);
-    sidebarOver.addEventListener('click', closeSidebar);
-    settingsBtn.addEventListener('click', openSettings);
-    settingsClose.addEventListener('click', closeSettings);
-    settingsOver.addEventListener('click', closeSettings);
-    settingsSave.addEventListener('click', saveSettingsUI);
-    clearHistBtn.addEventListener('click', () => {
-      if (!confirm('Clear all conversation history? This cannot be undone.')) return;
-      localStorage.removeItem('offlineai_history');
-      closeSettings();
-    });
-    nameBtn.addEventListener('click', submitName);
-    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitName(); });
-    spSelect.addEventListener('change', () => setSystemPromptById(spSelect.value));
-    spAddBtn.addEventListener('click', () => {
-      editingSpIdx = -1;
-      spNewName.value = ''; spNewContent.value = '';
-      spNewSave.textContent = 'Save prompt';
-      spNewForm.classList.remove('hidden');
-      spAddBtn.classList.add('hidden');
-      spNewName.focus();
-    });
-    spNewCancel.addEventListener('click', () => {
-      spNewForm.classList.add('hidden');
-      spAddBtn.classList.remove('hidden');
-      spNewName.value = ''; spNewContent.value = '';
-      editingSpIdx = -1;
-      spNewSave.textContent = 'Save prompt';
-    });
-    spNewSave.addEventListener('click', () => {
-      const name    = spNewName.value.trim();
-      const content = spNewContent.value.trim();
-      if (!name || !content) { (name ? spNewContent : spNewName).focus(); return; }
-      const prompts = getSavedPrompts();
-      if (editingSpIdx >= 0) {
-        const existingId = prompts[editingSpIdx].id;
-        prompts[editingSpIdx] = { id: existingId, name, content };
-        // If this prompt is active, refresh currentSystemPrompt
-        if (currentSystemPromptId === existingId) currentSystemPrompt = content;
-      } else {
-        prompts.push({ id: String(Date.now()), name, content });
-      }
-      persistSavedPrompts(prompts);
-      editingSpIdx = -1;
-      spNewSave.textContent = 'Save prompt';
-      renderSpSavedList();
-      renderSpSelect();
-      spNewForm.classList.add('hidden');
-      spAddBtn.classList.remove('hidden');
-      spNewName.value = ''; spNewContent.value = '';
-    });
-
-    attachBtn.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', e => {
-      const files = [...e.target.files];
-      if (files.length) addFiles(files);
-      e.target.value = '';
-    });
-
-    exportBtn.addEventListener('click', exportConversation);
-    shortcutsBtn.addEventListener('click', showShortcuts);
-    shortcutsClose.addEventListener('click', closeShortcuts);
-    shortcutsModal.addEventListener('click', e => { if (e.target === shortcutsModal) closeShortcuts(); });
-    pullBtn.addEventListener('click', () => pullModel(pullInput.value));
-    pullInput.addEventListener('keydown', e => { if (e.key === 'Enter') pullModel(pullInput.value); });
-
-    inputEl.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-    });
-    inputEl.addEventListener('input', () => autoResize(inputEl));
-
-    // Drag & drop
-    let dragCount = 0;
-    document.addEventListener('dragenter', e => {
-      const hasFile = [...(e.dataTransfer?.items || [])].some(i => i.kind === 'file');
-      if (hasFile) { dragCount++; document.body.classList.add('drag-active'); }
-    });
-    document.addEventListener('dragleave', () => {
-      dragCount = Math.max(0, dragCount - 1);
-      if (!dragCount) document.body.classList.remove('drag-active');
-    });
-    document.addEventListener('dragover', e => e.preventDefault());
-    document.addEventListener('drop', e => {
-      e.preventDefault(); dragCount = 0;
-      document.body.classList.remove('drag-active');
-      const files = [...e.dataTransfer.files];
-      if (files.length) addFiles(files);
-    });
-
-    // Paste
-    document.addEventListener('paste', e => {
-      const items = [...e.clipboardData.items];
-      const imgs = items.filter(i => i.type.startsWith('image/'));
-      if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => i.getAsFile())); }
-    });
-
-    // Lightbox
-    messagesEl.addEventListener('click', e => {
-      if (e.target.matches('.msg-images img')) {
-        lightboxImg.src = e.target.src;
-        lightbox.classList.add('open');
-      }
-    });
-    lightbox.addEventListener('click', () => lightbox.classList.remove('open'));
-
-    document.addEventListener('keydown', e => {
-      const inInput = ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
-      const mod     = isMac ? e.metaKey : e.ctrlKey;
-
-      if (e.key === 'Escape') {
-        lightbox.classList.remove('open');
-        closeSidebar();
-        closeSettings();
-        closeShortcuts();
-        if (!nameModal.classList.contains('hidden') && activeUsername) nameModal.classList.add('hidden');
-      }
-      if (!inInput && e.key === '?')       { e.preventDefault(); showShortcuts(); }
-      if (mod && e.key === 'k')            { e.preventDefault(); startNewChat(); }
-      if (mod && e.key === 'l')            { e.preventDefault(); toggleSidebar(); }
-      if (mod && e.key === 'e')            { e.preventDefault(); exportConversation(); }
-      if (mod && e.key === '/')            { e.preventDefault(); inputEl.focus(); }
-    });
-  }
-
-  // ── Sidebar ───────────────────────────────────────────
-  function toggleSidebar() {
-    sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
-  }
-  function openSidebar() {
-    renderHistoryList();
-    sidebar.classList.add('open');
-    sidebarOver.classList.add('open');
-  }
-  function closeSidebar() {
-    sidebar.classList.remove('open');
-    sidebarOver.classList.remove('open');
-  }
-
-  function renderHistoryList() {
-    const items = getHistory();
-    if (!items.length) {
-      historyList.innerHTML = '<div class="history-empty">No conversations yet</div>';
-      return;
-    }
-    historyList.innerHTML = '';
-    for (const item of items) {
-      const div = document.createElement('div');
-      div.className = 'history-item' + (item.id === currentConvId ? ' active' : '');
-      div.innerHTML = `
-        <div class="history-item-main">
-          <div class="history-title">${escHtml(item.title)}</div>
-          <div class="history-meta">
-            <span>${escHtml(formatDate(item.timestamp))}</span>
-            <span>${escHtml(item.model)}</span>
-          </div>
-        </div>
-        <button class="history-del-btn" title="Delete conversation" aria-label="Delete">✕</button>`;
-      div.querySelector('.history-item-main').addEventListener('click', () => loadConversation(item));
-      const titleEl = div.querySelector('.history-title');
-      titleEl.title = 'Double-click to rename';
-      titleEl.addEventListener('dblclick', e => { e.stopPropagation(); startRename(div, item); });
-      div.querySelector('.history-del-btn').addEventListener('click', e => {
-        e.stopPropagation();
-        const h = getHistory().filter(x => x.id !== item.id);
-        try { localStorage.setItem('offlineai_history', JSON.stringify(h)); } catch {}
-        if (currentConvId === item.id) { startNewChat(); closeSidebar(); return; }
-        renderHistoryList();
-      });
-      historyList.appendChild(div);
-    }
-  }
-
-  function loadConversation(item) {
-    if (isStreaming) return;
-    messages = item.messages;
-    currentConvId = item.id;
-    setSystemPromptById(item.systemPromptId || '');
-    messagesEl.innerHTML = '';
-    for (const msg of messages) {
-      if (msg.role === 'user') {
-        appendUserBubble(msg, []);
-      } else if (msg.role === 'assistant') {
-        const el = document.createElement('div');
-        el.className = 'message assistant';
-        el.innerHTML = `
-          <div class="avatar">⚡</div>
-          <div class="message-body">
-            <div class="msg-text">${DOMPurify.sanitize(renderMd(msg.content))}</div>
-          </div>`;
-        el.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
-        el.querySelectorAll('pre').forEach(addCopyBtn);
-        messagesEl.appendChild(el);
-      }
-    }
-    closeSidebar();
-    scrollBottom();
-  }
-
-  // ── History persistence ───────────────────────────────
-  function getHistory() {
-    try { return JSON.parse(localStorage.getItem('offlineai_history') || '[]'); }
-    catch { return []; }
-  }
-
-  function saveToHistory() {
-    if (!messages.length) return;
-    const history = getHistory();
-    const isNew = !currentConvId;
-    const id = currentConvId || String(Date.now());
-    currentConvId = id;
-    // Strip base64 images to avoid localStorage bloat
-    const stripped = messages.map(({ images, ...rest }) => rest);
-    const existing = history.find(h => h.id === id);
-    const title = existing?.title || stripped[0]?.content?.trim().slice(0, 72) || 'Image conversation';
-    const entry = { id, title, timestamp: Date.now(), model: activeModel, messages: stripped, systemPrompt: currentSystemPrompt, systemPromptId: currentSystemPromptId };
-    const idx = history.findIndex(h => h.id === id);
-    if (idx >= 0) history[idx] = entry; else history.unshift(entry);
-    try {
-      localStorage.setItem('offlineai_history', JSON.stringify(history.slice(0, MAX_HISTORY)));
-    } catch { /* storage full — skip */ }
-    // Generate an AI title only once, after the first full exchange
-    if (isNew && stripped.length >= 2) {
-      generateTitle(stripped).then(title => {
-        if (!title) return;
-        const h = getHistory();
-        const i = h.findIndex(x => x.id === id);
-        if (i >= 0) { h[i].title = title; }
-        try { localStorage.setItem('offlineai_history', JSON.stringify(h)); } catch {}
-        if (sidebar.classList.contains('open')) renderHistoryList();
-      });
-    }
-  }
-
-  async function generateTitle(stripped) {
-    const excerpt = stripped.slice(0, 2)
-      .map(m => `${m.role}: ${m.content.slice(0, 400)}`).join('\n');
-    try {
-      const resp = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: activeModel,
-          messages: [{
-            role: 'user',
-            content: `Give this conversation a short title of 4 words or less. Reply with the title only — no punctuation, no quotes, no explanation:\n\n${excerpt}`
-          }],
-          stream: false
-        })
-      });
-      const text = await resp.text();
-      // stream:false returns one JSON line
-      const d = JSON.parse(text.trim().split('\n')[0]);
-      addTokens(d.prompt_eval_count || 0, d.eval_count || 0);
-      const title = d.message?.content?.trim().replace(/^["']+|["']+$/g, '').slice(0, 72);
-      return title || null;
-    } catch {
-      return null;
-    }
-  }
-
-  function formatDate(ts) {
-    const d = new Date(ts), now = new Date();
-    if (d.toDateString() === now.toDateString())
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  }
-
-  // ── File helpers ──────────────────────────────────────
-  async function addFiles(files) {
-    const caps = await fetchModelCaps(activeModel);
-    for (const file of files) {
-      if (file.type.startsWith('image/')) {
-        if (caps.vision) {
-          const dataUrl = await readDataUrl(file);
-          pendingImages.push({ dataUrl, base64: dataUrl.split(',')[1] });
-        }
-      } else {
-        try {
-          const content = await readTextFile(file);
-          pendingFiles.push({ name: file.name, content });
-        } catch { /* skip unreadable */ }
-      }
-    }
-    renderPreviews();
-  }
-
-  // Convenience alias kept for drag/paste image paths
-  async function addImages(files) { await addFiles(files); }
-
-  function readDataUrl(file) {
-    return new Promise(resolve => {
-      const r = new FileReader();
-      r.onload = e => resolve(e.target.result);
-      r.readAsDataURL(file);
-    });
-  }
-
-  function readTextFile(file) {
-    return new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload  = e => resolve(e.target.result);
-      r.onerror = reject;
-      r.readAsText(file);
-    });
-  }
-
-  function renderPreviews() {
-    previewsEl.innerHTML = '';
-    if (!pendingImages.length && !pendingFiles.length) { previewsEl.style.display = 'none'; return; }
-    previewsEl.style.display = 'flex';
-    pendingImages.forEach((img, i) => {
-      const div = document.createElement('div');
-      div.className = 'img-thumb';
-      const thumb = document.createElement('img');
-      thumb.src = img.dataUrl; thumb.alt = 'preview';
-      const rm = document.createElement('button');
-      rm.className = 'rm-img'; rm.textContent = '×';
-      rm.setAttribute('aria-label', 'Remove image');
-      rm.addEventListener('click', () => { pendingImages.splice(i, 1); renderPreviews(); });
-      div.appendChild(thumb); div.appendChild(rm);
-      previewsEl.appendChild(div);
-    });
-    pendingFiles.forEach((f, i) => {
-      const div = document.createElement('div');
-      div.className = 'img-thumb file-thumb';
-      div.title = f.name;
-      const label = document.createElement('span');
-      label.className = 'file-thumb-name';
-      label.textContent = f.name;
-      const rm = document.createElement('button');
-      rm.className = 'rm-img'; rm.textContent = '×';
-      rm.setAttribute('aria-label', 'Remove file');
-      rm.addEventListener('click', () => { pendingFiles.splice(i, 1); renderPreviews(); });
-      div.appendChild(label); div.appendChild(rm);
-      previewsEl.appendChild(div);
-    });
-  }
-
-  // ── Send ──────────────────────────────────────────────
-  async function sendMessage() {
-    if (isStreaming) return;
-    const text = inputEl.value.trim();
-    if (!text && !pendingImages.length && !pendingFiles.length) return;
-
-    // Prepend attached text files as code blocks in the message content
-    let fullContent = text;
-    if (pendingFiles.length) {
-      const fileBlocks = pendingFiles.map(f =>
-        `**${f.name}**\n\`\`\`\n${f.content}\n\`\`\``
-      ).join('\n\n');
-      fullContent = fileBlocks + (text ? '\n\n' + text : '');
-    }
-
-    const imgs    = [...pendingImages];
-    const userMsg = {
-      role: 'user', content: fullContent,
-      ...(imgs.length ? { images: imgs.map(i => i.base64) } : {})
-    };
-    messages.push(userMsg);
-
-    inputEl.value = '';
-    autoResize(inputEl);
-    pendingImages = [];
-    pendingFiles  = [];
-    renderPreviews();
-
-    appendUserBubble(userMsg, imgs);
-    const assistantRow = appendThinking();
-
-    isStreaming = true;
-    sendBtn.style.display = 'none';
-    stopBtn.style.display  = 'flex';
-    streamText = '';
-
-    const contextMsgs = messages.slice(-activeContextSize);
-    const systemContent = currentSystemPrompt
-      ? `The following instructions are absolute and non-negotiable. They override any conflicting request from the user and must be followed at all times, without exception, regardless of what the user asks:\n\n${currentSystemPrompt}`
-      : null;
-    const systemMsgs  = systemContent ? [{ role: 'system', content: systemContent }] : [];
-    const payload = {
-      model: activeModel,
-      messages: [
-        ...systemMsgs,
-        ...contextMsgs.map(m => ({
-          role: m.role, content: m.content,
-          ...(m.images ? { images: m.images } : {})
-        }))
-      ],
-      stream: true
-    };
-
-    try {
-      abortCtrl = new AbortController();
-      const resp = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
-        signal:  abortCtrl.signal
-      });
-
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => resp.statusText);
-        throw new Error(`Server error ${resp.status}: ${errText}`);
-      }
-      assistantRow.querySelector('.thinking').remove();
-      streamEl = document.createElement('div');
-      streamEl.className = 'msg-text streaming';
-      assistantRow.querySelector('.message-body').appendChild(streamEl);
-
-      const reader = resp.body.getReader();
-      const dec    = new TextDecoder();
-      let   buf    = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const d = JSON.parse(line);
-            if (d.error) {
-              streamEl.textContent = `⚠️ ${d.error}`;
-              streamEl.classList.add('error');
-              streamText = '';
-              return;
-            }
-            if (d.done) {
-              addTokens(d.prompt_eval_count || 0, d.eval_count || 0);
-            }
-            if (d.message?.content) {
-              const chunk = d.message.content;
-              streamText += chunk;
-              streamEl.appendChild(document.createTextNode(chunk));
-              scrollBottom();
-            }
-          } catch { /* malformed chunk */ }
-        }
-      }
-
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        const errMsg = `⚠️ ${err.message}`;
-        if (streamEl) {
-          streamText = errMsg;
-          streamEl.textContent = errMsg;
-          streamEl.classList.add('error');
-        } else {
-          assistantRow.querySelector('.thinking')?.remove();
-          const el = document.createElement('div');
-          el.className = 'msg-text error';
-          el.textContent = errMsg;
-          assistantRow.querySelector('.message-body').appendChild(el);
-        }
-        streamText = '';
-      }
-    } finally {
-      isStreaming = false;
-      sendBtn.style.display = 'flex';
-      stopBtn.style.display  = 'none';
-
-      if (streamEl && streamText && !streamEl.classList.contains('error')) {
-        streamEl.classList.remove('streaming');
-        streamEl.innerHTML = DOMPurify.sanitize(renderMd(streamText));
-        streamEl.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
-        streamEl.querySelectorAll('pre').forEach(addCopyBtn);
-        messages.push({ role: 'assistant', content: streamText });
-        saveToHistory();
-      } else if (streamText && !streamEl?.classList.contains('error')) {
-        messages.push({ role: 'assistant', content: streamText });
-        saveToHistory();
-      }
-
-      streamEl   = null;
-      streamText = '';
-      scrollBottom();
-      inputEl.focus();
-    }
-  }
-
-  // ── DOM helpers ───────────────────────────────────────
-  function appendUserBubble(msg, imgs) {
-    document.getElementById('welcome')?.remove();
-    const el = document.createElement('div');
-    el.className = 'message user';
-    const imagesHtml = imgs.length
-      ? `<div class="msg-images">${imgs.map(i => `<img src="${escHtml(i.dataUrl)}" alt="attached image">`).join('')}</div>`
-      : '';
-    const textHtml = msg.content
-      ? `<div class="msg-text">${escHtml(msg.content)}</div>`
-      : '';
-    const initial = activeUsername ? escHtml(activeUsername[0].toUpperCase()) : 'U';
-    el.innerHTML = `<div class="avatar">${initial}</div><div class="message-body">${imagesHtml}${textHtml}</div>`;
-    messagesEl.appendChild(el);
-    scrollBottom();
-  }
-
-  function appendThinking() {
-    document.getElementById('welcome')?.remove();
-    const el = document.createElement('div');
-    el.className = 'message assistant';
-    el.innerHTML = `
-      <div class="avatar">⚡</div>
-      <div class="message-body">
-        <div class="thinking"><span></span><span></span><span></span></div>
-      </div>`;
-    messagesEl.appendChild(el);
-    scrollBottom();
-    return el;
-  }
-
-  function renderMd(text) { return marked.parse(text); }
-
-  function addCopyBtn(pre) {
-    const btn = document.createElement('button');
-    btn.className = 'copy-code-btn';
-    btn.textContent = 'Copy';
-    btn.addEventListener('click', () => {
-      const code = pre.querySelector('code')?.textContent || pre.textContent;
-      navigator.clipboard.writeText(code).then(() => {
-        btn.textContent = '✓ Copied';
-        setTimeout(() => btn.textContent = 'Copy', 2000);
-      });
-    });
-    pre.appendChild(btn);
-  }
-
-  function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
-
-  function autoResize(el) {
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 180) + 'px';
-  }
-
-  function escHtml(str) {
-    return str
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  // ── Chat management ───────────────────────────────────
-  function startNewChat() {
-    if (isStreaming) return;
-    messages = [];
-    currentConvId = null;
-    resetSystemPrompt();
-    messagesEl.innerHTML = '';
-    showWelcome();
-    inputEl.focus();
-  }
-
-  function showWelcome() {
-    const el = document.createElement('div');
-    el.id = 'welcome';
-    const greeting = activeUsername ? `Hello, ${escHtml(activeUsername)}` : 'OfflineAI';
-    el.innerHTML = `
-      <div class="welcome-glyph">⚡</div>
-      <h2>${greeting}</h2>
-      <p>Chat privately with <strong>${escHtml(activeModel)}</strong> running locally.<br>No data ever leaves your device.</p>`;
-    messagesEl.appendChild(el);
-  }
-
-  window.setPrompt = function(text) {
-    inputEl.value = text;
-    autoResize(inputEl);
-    inputEl.focus();
-  };
-
-  init();
-</script>
+  <script src="/frontend/settings-tooltips.js?v=20260513-2" defer></script>
+  <script src="/frontend/app.js?v=20260513-2" defer></script>
 </body>
 </html>

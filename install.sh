@@ -22,21 +22,33 @@ else
   echo "✔ Homebrew already installed"
 fi
 
-# ── 2. Python 3 ────────────────────────────────────────────────────
-if ! command -v python3 > /dev/null 2>&1; then
+# ── 2. Python 3.10+ ────────────────────────────────────────────────
+pick_python() {
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    if command -v "$candidate" > /dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' > /dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! PYTHON_BIN="$(pick_python)"; then
   echo ""
-  echo "▶ Installing Python 3..."
+  echo "▶ Installing Python 3.10+..."
   brew install python3
-  echo "✔ Python 3 installed"
-else
-  echo "✔ Python 3 found: $(python3 --version)"
+  if ! PYTHON_BIN="$(pick_python)"; then
+    echo "✖ Python 3.10+ is required but was not found after install."
+    exit 1
+  fi
 fi
+echo "✔ Python found: $("$PYTHON_BIN" --version) ($PYTHON_BIN)"
 
 # ── 3. Virtual environment + Python deps ──────────────────────────
 if [[ ! -d "$SCRIPT_DIR/.venv" ]]; then
   echo ""
   echo "▶ Creating virtual environment..."
-  python3 -m venv "$SCRIPT_DIR/.venv"
+  "$PYTHON_BIN" -m venv "$SCRIPT_DIR/.venv"
   echo "✔ Virtual environment created"
 else
   echo "✔ Virtual environment already exists"
@@ -95,10 +107,27 @@ mkdir -p "$STATIC_DIR"
 
 echo ""
 echo "▶ Vendoring front-end assets..."
-[[ ! -f "$STATIC_DIR/marked.min.js" ]]       && curl -fsSL "https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"                                            -o "$STATIC_DIR/marked.min.js"
-[[ ! -f "$STATIC_DIR/dompurify.min.js" ]]    && curl -fsSL "https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"                                     -o "$STATIC_DIR/dompurify.min.js"
-[[ ! -f "$STATIC_DIR/highlight.min.js" ]]    && curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"                    -o "$STATIC_DIR/highlight.min.js"
-[[ ! -f "$STATIC_DIR/github-dark.min.css" ]] && curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"          -o "$STATIC_DIR/github-dark.min.css"
+
+download_asset() {
+  local file="$1"
+  local url="$2"
+  local expected="$3"
+  [[ -f "$file" ]] || curl -fsSL "$url" -o "$file"
+  local actual
+  actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+  if [[ "$actual" != "$expected" ]]; then
+    rm -f "$file"
+    echo "✖ Checksum mismatch for $(basename "$file")"
+    echo "  Expected: $expected"
+    echo "  Actual:   $actual"
+    exit 1
+  fi
+}
+
+download_asset "$STATIC_DIR/marked.min.js"       "https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"                                   "15fabce5b65898b32b03f5ed25e9f891a729ad4c0d6d877110a7744aa847a894"
+download_asset "$STATIC_DIR/dompurify.min.js"    "https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"                            "ef9a98b5b21aac33c73e316ef21f5cf06f68eff003a40ac953022129112cff3c"
+download_asset "$STATIC_DIR/highlight.min.js"    "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"           "837a6fa5b0c736b52bbde2b2b6190f305da3fc9ed41681db5321507057b5c846"
+download_asset "$STATIC_DIR/github-dark.min.css" "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" "9f208d022102b1d0c7aebfecd8e42ca7997d5de636649d2b31ea63093d809019"
 echo "✔ Front-end assets ready"
 
 # ── Done ───────────────────────────────────────────────────────────

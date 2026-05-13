@@ -13,10 +13,10 @@ echo   OfflineAI — Installer (Windows)
 echo ==========================================
 echo.
 
-:: ── 1. Check Python 3 ────────────────────────────────────────────
-python --version >nul 2>&1
+:: ── 1. Check Python 3.10+ ────────────────────────────────────────
+python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo [!] Python 3 not found.
+    echo [!] Python 3.10+ not found.
     echo     Download and install it from: https://www.python.org/downloads/
     echo     Make sure to check "Add Python to PATH" during setup.
     echo.
@@ -96,18 +96,10 @@ if not exist "%STATIC_DIR%" mkdir "%STATIC_DIR%"
 echo.
 echo [>>] Vendoring front-end assets...
 
-if not exist "%STATIC_DIR%\marked.min.js" (
-    curl -fsSL "https://cdn.jsdelivr.net/npm/marked@12/marked.min.js" -o "%STATIC_DIR%\marked.min.js"
-)
-if not exist "%STATIC_DIR%\dompurify.min.js" (
-    curl -fsSL "https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js" -o "%STATIC_DIR%\dompurify.min.js"
-)
-if not exist "%STATIC_DIR%\highlight.min.js" (
-    curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" -o "%STATIC_DIR%\highlight.min.js"
-)
-if not exist "%STATIC_DIR%\github-dark.min.css" (
-    curl -fsSL "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" -o "%STATIC_DIR%\github-dark.min.css"
-)
+call :download_asset "%STATIC_DIR%\marked.min.js" "https://cdn.jsdelivr.net/npm/marked@12/marked.min.js" "15fabce5b65898b32b03f5ed25e9f891a729ad4c0d6d877110a7744aa847a894" || exit /b 1
+call :download_asset "%STATIC_DIR%\dompurify.min.js" "https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js" "ef9a98b5b21aac33c73e316ef21f5cf06f68eff003a40ac953022129112cff3c" || exit /b 1
+call :download_asset "%STATIC_DIR%\highlight.min.js" "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" "837a6fa5b0c736b52bbde2b2b6190f305da3fc9ed41681db5321507057b5c846" || exit /b 1
+call :download_asset "%STATIC_DIR%\github-dark.min.css" "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" "9f208d022102b1d0c7aebfecd8e42ca7997d5de636649d2b31ea63093d809019" || exit /b 1
 echo [OK] Front-end assets ready
 
 :: ── Done ──────────────────────────────────────────────────────────
@@ -118,3 +110,22 @@ echo   Run the app with:  start.bat
 echo ==========================================
 echo.
 pause
+exit /b 0
+
+:download_asset
+set "ASSET_FILE=%~1"
+set "ASSET_URL=%~2"
+set "ASSET_EXPECTED=%~3"
+if not exist "%ASSET_FILE%" (
+    curl -fsSL "%ASSET_URL%" -o "%ASSET_FILE%"
+)
+set "ASSET_HASH="
+for /f "tokens=*" %%h in ('powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 -Path '%ASSET_FILE%').Hash.ToLower()"') do set "ASSET_HASH=%%h"
+if /i not "%ASSET_HASH%"=="%ASSET_EXPECTED%" (
+    del "%ASSET_FILE%" >nul 2>&1
+    echo [!] Checksum mismatch for %~nx1
+    echo     Expected: %ASSET_EXPECTED%
+    echo     Actual:   %ASSET_HASH%
+    exit /b 1
+)
+exit /b 0

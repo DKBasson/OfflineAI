@@ -6,6 +6,9 @@ set "SCRIPT_DIR=%~dp0"
 set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 cd /d "%SCRIPT_DIR%"
 
+if not defined OFFLINEAI_HOST set "OFFLINEAI_HOST=127.0.0.1"
+if not defined OFFLINEAI_PORT set "OFFLINEAI_PORT=8080"
+
 :: ── Ollama ────────────────────────────────────────────────────────
 tasklist /FI "IMAGENAME eq ollama.exe" 2>nul | find /i "ollama.exe" >nul
 if errorlevel 1 (
@@ -34,37 +37,51 @@ if not exist "%SCRIPT_DIR%\.venv\Scripts\python.exe" (
     exit /b 1
 )
 
+if /i "%OFFLINEAI_HOST%"=="0.0.0.0" (
+    if not defined OFFLINEAI_TOKEN (
+        for /f "tokens=*" %%i in ('"%SCRIPT_DIR%\.venv\Scripts\python.exe" -c "import secrets; print(secrets.token_urlsafe(18))"') do set "OFFLINEAI_TOKEN=%%i"
+    )
+)
+
 :: Start app in background, capture PID via a temp file
 start /b "" "%SCRIPT_DIR%\.venv\Scripts\python.exe" "%SCRIPT_DIR%\app.py"
 
 :: Wait for server to be ready (up to 5 s)
 for /l %%i in (1,1,10) do (
     ping -n 1 -w 500 127.0.0.1 >nul
-    curl -s http://127.0.0.1:8080/ >nul 2>&1 && goto :app_ready
+    curl -s http://127.0.0.1:%OFFLINEAI_PORT%/ >nul 2>&1 && goto :app_ready
 )
 echo [!] App did not start in time.
 pause
 exit /b 1
 
 :app_ready
-:: Resolve LAN IP
-for /f "tokens=*" %%i in ('"%SCRIPT_DIR%\.venv\Scripts\python.exe" -c "import socket; s=socket.socket(); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2^>nul') do set "LAN_IP=%%i"
-if "%LAN_IP%"=="" set "LAN_IP=127.0.0.1"
-
 echo [OK] App running
-echo    Local:   http://127.0.0.1:8080
-echo    Network: http://%LAN_IP%:8080
+set "LOCAL_URL=http://127.0.0.1:%OFFLINEAI_PORT%"
+if defined OFFLINEAI_TOKEN set "LOCAL_URL=!LOCAL_URL!?token=!OFFLINEAI_TOKEN!"
+echo    Local:   !LOCAL_URL!
+if /i "%OFFLINEAI_HOST%"=="0.0.0.0" (
+    set "LAN_IP="
+    for /f "tokens=*" %%i in ('"%SCRIPT_DIR%\.venv\Scripts\python.exe" -c "import socket; s=socket.socket(); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2^>nul') do set "LAN_IP=%%i"
+    if "!LAN_IP!"=="" set "LAN_IP=127.0.0.1"
+    set "NETWORK_URL=http://!LAN_IP!:%OFFLINEAI_PORT%"
+    if defined OFFLINEAI_TOKEN set "NETWORK_URL=!NETWORK_URL!?token=!OFFLINEAI_TOKEN!"
+    echo    Network: !NETWORK_URL!
+    if defined OFFLINEAI_TOKEN echo    Token:   !OFFLINEAI_TOKEN!
+) else (
+    echo    Network: disabled ^(set OFFLINEAI_HOST=0.0.0.0 to expose^)
+)
 echo.
 echo    Press Ctrl+C to stop.
 echo.
 
 :: Open browser
-start "" "http://127.0.0.1:8080"
+start "" "!LOCAL_URL!"
 
 :: Keep window open so Ctrl+C is visible
 :loop
 timeout /t 2 >nul
-curl -s http://127.0.0.1:8080/ >nul 2>&1
+curl -s http://127.0.0.1:%OFFLINEAI_PORT%/ >nul 2>&1
 if errorlevel 1 (
     echo [!] App stopped unexpectedly.
     pause

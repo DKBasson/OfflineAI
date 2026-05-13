@@ -12,16 +12,21 @@ Built with [Ollama](https://ollama.com), FastAPI, and a single-file iOS-style gl
 
 - **Fully offline** — all inference runs locally via Ollama
 - **iOS 26 glass design** — backdrop blur, safe-area insets, mobile-responsive
-- **Conversation history** — persisted in `localStorage` with AI-generated titles and inline rename
-- **System prompts** — save and reuse custom system prompts per conversation
+- **Conversation history** — persisted locally in browser IndexedDB with search and AI-generated titles
+- **System prompts** — save, duplicate, reorder, and set a default prompt for new conversations
 - **Image & file support** — attach images or text files via picker, drag-and-drop, or paste
+- **Per-chat model selection** — choose a different Ollama model for each conversation
+- **Local tuning controls** — adjust temperature, top-p, reply tokens, model context tokens, and saved chat limit
 - **Markdown rendering** — with syntax highlighting and copy-to-clipboard
 - **Export conversations** — download any chat as a Markdown file
 - **Model pull** — download new Ollama models directly from the Settings panel
-- **Cumulative token counter** — tracks total input/output tokens across the session
+- **Ollama restart** — restart the local Ollama runtime from Settings
+- **Cumulative token counter** — tracks total input/output tokens locally and can be reset in Settings
 - **Keyboard shortcuts** — full keyboard navigation (`?` to see all shortcuts)
-- **LAN access** — serve to any device on your local network
-- **No CDN at runtime** — all JS/CSS assets vendored locally
+- **LAN access** — opt-in serving to devices on your local network
+- **LAN token auth** — LAN launch scripts generate a one-time access token automatically
+- **Message controls** — copy messages and regenerate the latest assistant response
+- **No CDN at runtime** — all JS/CSS assets vendored locally with checksum verification
 
 ---
 
@@ -55,6 +60,9 @@ chmod +x install.sh && ./install.sh
 
 # 3. Start the app
 chmod +x start.sh && ./start.sh
+
+# Optional: expose on your LAN
+OFFLINEAI_HOST=0.0.0.0 ./start.sh
 ```
 
 ### Windows
@@ -69,6 +77,10 @@ install.bat
 
 :: 3. Start the app
 start.bat
+
+:: Optional: expose on your LAN
+set OFFLINEAI_HOST=0.0.0.0
+start.bat
 ```
 
 > **Windows note:** Ollama must be installed manually first from [ollama.com/download/windows](https://ollama.com/download/windows). The installer will check and prompt you if it is missing.
@@ -82,12 +94,15 @@ start.bat
 - Pulls the `gemma4:e4b` model (~3.5 GB)
 - Downloads frontend assets to `static/`
 
-After `start.sh` / `start.bat` runs, your browser will open automatically. The terminal prints both local and network URLs:
+After `start.sh` / `start.bat` runs, your browser will open automatically. By default the app only listens on localhost:
 
 ```
   Local:    http://127.0.0.1:8080
-  Network:  http://192.168.x.x:8080
+  Network:  disabled (set OFFLINEAI_HOST=0.0.0.0 to expose)
 ```
+
+When LAN mode is enabled with `OFFLINEAI_HOST=0.0.0.0`, the terminal also prints the network URL.
+That URL includes a `token` query parameter for non-local devices. Localhost remains accessible without a token. Share the full network URL only with devices you trust.
 
 ---
 
@@ -101,10 +116,13 @@ After `start.sh` / `start.bat` runs, your browser will open automatically. The t
 | Toggle history sidebar | **⌘L** / **Ctrl+L** |
 | Export conversation | **⌘E** / **Ctrl+E** |
 | Focus input | **⌘/** / **Ctrl+/** |
+| Focus mode | **Shift+⌘F** / **Shift+Ctrl+F** |
 | Show all shortcuts | **?** |
 | Attach image or file | Click 📎, drag-and-drop, or paste |
 | Stop generation | Click the red ■ stop button |
-| Rename a conversation | Double-click its title in the sidebar |
+| Search history | Open History and type in the search field |
+| Choose model | Use the Model selector above the message box |
+| Copy / regenerate | Hover a message and use its action buttons |
 | View full-size image | Click any image in the chat |
 
 ---
@@ -127,8 +145,11 @@ After `start.sh` / `start.bat` runs, your browser will open automatically. The t
 ```
 OfflineAI/
 ├── app.py            # FastAPI backend — serves UI, proxies Ollama
-├── index.html        # Single-file SPA frontend
+├── index.html        # App shell and HTML structure
 ├── styles.css        # App stylesheet
+├── frontend/         # Browser-side app behavior
+│   ├── app.js
+│   └── settings-tooltips.js
 ├── requirements.txt  # Python dependencies
 ├── install.sh        # One-time setup (macOS/Linux)
 ├── start.sh          # Launch script (macOS/Linux)
@@ -141,10 +162,10 @@ OfflineAI/
 
 ## Configuration
 
-To change the default model, update the fallback constant in `index.html` and the model name in the installer:
+To change the default model, update the fallback constant in `frontend/app.js` and the model name in the installer:
 
 ```js
-// index.html
+// frontend/app.js
 const FALLBACK_MODEL = 'gemma4:e4b';
 ```
 
@@ -154,16 +175,47 @@ MODEL="gemma4:e4b"
 ```
 
 Any model available in Ollama can be used. See [ollama.com/library](https://ollama.com/library).  
-You can also pull new models at runtime from the **Settings → Model** panel without restarting.
+You can pull new models at runtime from **Settings → Models & context**, then choose the model from the selector above the message box. Each saved conversation keeps its own selected model.
+
+Most runtime preferences live in the browser only under **Settings**. These include generation sampling, model context tokens, auto-title behavior, saved history limit, and token counter reset. Attached images are sent as their original browser file data without client-side compression.
+
+The **Restart Ollama** button in Settings uses the local `ollama serve` workflow by default. Set `OLLAMA_RESTART_CMD` if your machine needs a custom restart command such as a service manager command.
+
+Runtime environment variables:
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `OFFLINEAI_HOST` | `127.0.0.1` | Bind address. Use `0.0.0.0` only when you want LAN access. |
+| `OFFLINEAI_PORT` | `8080` | Web server port. |
+| `OFFLINEAI_TOKEN` | auto-generated in LAN mode | API token required for non-local LAN clients. |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint. |
 
 ---
 
 ## Privacy
 
 - All conversation data stays on your device
-- History is stored in browser `localStorage` only
-- No analytics, telemetry, or network requests outside your LAN
+- The web server binds to `127.0.0.1` by default; LAN access is opt-in
+- History is stored in browser IndexedDB on the user's device
+- No analytics or telemetry
 - Base64 image data is stripped before saving to history to minimise storage use
+
+---
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+The backend tests cover the UI route, Ollama-offline fallback behavior, request size limits, and LAN token auth.
+
+Optional browser smoke test:
+
+```bash
+npm install
+npm run test:ui
+```
 
 ---
 
