@@ -2,7 +2,6 @@
   const FALLBACK_MODEL = 'gemma4:e4b';
   const SETTINGS_KEY   = 'offlineai_settings';
   const PROMPTS_KEY    = 'offlineai_prompts';
-  const TOKENS_KEY     = 'offlineai_tokens';
   const AUTH_TOKEN_KEY = 'offlineai_auth_token';
   const HISTORY_KEY    = 'offlineai_history';
   const HISTORY_DB     = 'offlineai_history_db';
@@ -94,17 +93,6 @@
   }
 
   // ── Token tracking ────────────────────────────────────
-  function getTokenTotals() {
-    try { return JSON.parse(localStorage.getItem(TOKENS_KEY) || '{"input":0,"output":0}'); }
-    catch { return { input: 0, output: 0 }; }
-  }
-  function addTokens(inputToks, outputToks) {
-    const t = getTokenTotals();
-    t.input  += inputToks  || 0;
-    t.output += outputToks || 0;
-    try { localStorage.setItem(TOKENS_KEY, JSON.stringify(t)); } catch {}
-    renderTokenCounter(t);
-  }
   function fmtTokens(n) {
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
     if (n >= 1_000)     return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'k';
@@ -114,6 +102,16 @@
     const total = (t.input || 0) + (t.output || 0);
     tokenCountEl.textContent = fmtTokens(total);
     tokenCounterEl.title = `Tokens used\nInput: ${t.input.toLocaleString()}\nOutput: ${t.output.toLocaleString()}\nTotal: ${total.toLocaleString()}`;
+  }
+  async function fetchAndRenderTokens() {
+    if (!activeUsername) return;
+    try {
+      const r = await fetch('/api/tokens', { headers: authHeaders() });
+      if (!r.ok) return;
+      const stats = await r.json();
+      const entry = stats[activeUsername] || [0, 0];
+      renderTokenCounter({ input: entry[0], output: entry[1] });
+    } catch {}
   }
 
   // ── Active config (loaded from settings at init) ──────
@@ -296,7 +294,7 @@
     await initHistoryStore();
     setupListeners();
     applyDefaultSystemPrompt();
-    renderTokenCounter(getTokenTotals());
+    renderTokenCounter({ input: 0, output: 0 });
     await refreshChatModelSelect(activeModel);
     refreshConnectionStatus();
     setInterval(refreshConnectionStatus, 30000);
@@ -305,6 +303,7 @@
     if (!activeUsername) {
       showNameModal();
     } else {
+      fetchAndRenderTokens();
       inputEl.focus();
     }
   }
@@ -324,6 +323,7 @@
     nameModal.classList.add('hidden');
     document.getElementById('welcome')?.remove();
     showWelcome();
+    fetchAndRenderTokens();
     inputEl.focus();
   }
 
@@ -804,10 +804,12 @@
     settingsOver.addEventListener('click', closeSettings);
     settingsSave.addEventListener('click', saveSettingsUI);
     restartOllamaBtn.addEventListener('click', restartOllama);
-    resetTokensBtn.addEventListener('click', () => {
-      const empty = { input: 0, output: 0 };
-      try { localStorage.setItem(TOKENS_KEY, JSON.stringify(empty)); } catch {}
-      renderTokenCounter(empty);
+    resetTokensBtn.addEventListener('click', async () => {
+      if (!activeUsername) return;
+      await fetch(`/api/tokens?user=${encodeURIComponent(activeUsername)}`, {
+        method: 'DELETE', headers: authHeaders()
+      }).catch(() => {});
+      renderTokenCounter({ input: 0, output: 0 });
     });
     clearHistBtn.addEventListener('click', () => {
       if (!confirm('Clear all conversation history? This cannot be undone.')) return;
@@ -1056,13 +1058,14 @@
             content: `Give this conversation a short title of 4 words or less. Reply with the title only — no punctuation, no quotes, no explanation:\n\n${excerpt}`
           }],
           stream: false,
-          options: { temperature: 0.2, top_p: 0.9, num_predict: 16 }
+          options: { temperature: 0.2, top_p: 0.9, num_predict: 16 },
+          ...(activeUsername ? { user: activeUsername } : {})
         })
       });
       const text = await resp.text();
       // stream:false returns one JSON line
       const d = JSON.parse(text.trim().split('\n')[0]);
-      addTokens(d.prompt_eval_count || 0, d.eval_count || 0);
+      fetchAndRenderTokens();
       const title = d.message?.content?.trim().replace(/^["']+|["']+$/g, '').slice(0, 72);
       return title || null;
     } catch {
@@ -1087,10 +1090,7 @@
           pendingImages.push({ dataUrl, base64: dataUrl.split(',')[1] });
         }
       } else {
-        try {
-          const content = await readTextFile(file);
-          pendingFiles.push({ name: file.name, content });
-        } catch { /* skip unreadable */ }
+        pendingFiles.push({ name: file.name, file });
       }
     }
     renderPreviews();
@@ -1168,7 +1168,8 @@
         }))
       ],
       stream: true,
-      options: getGenerationOptions()
+      options: getGenerationOptions(),
+      ...(activeUsername ? { user: activeUsername } : {})
     };
   }
 
@@ -1245,7 +1246,7 @@
               requestFailed = true;
               return;
             }
-            if (d.done) addTokens(d.prompt_eval_count || 0, d.eval_count || 0);
+            if (d.done) fetchAndRenderTokens();
             if (d.message?.content) {
               streamText += d.message.content;
               streamEl.appendChild(document.createTextNode(d.message.content));
@@ -1327,8 +1328,11 @@
     // Prepend attached text files as code blocks in the message content
     let fullContent = text;
     if (pendingFiles.length) {
-      const fileBlocks = pendingFiles.map(f =>
-        `**${f.name}**\n\`\`\`\n${f.content}\n\`\`\``
+      const fileContents = await Promise.all(
+        pendingFiles.map(f => readTextFile(f.file).catch(() => ''))
+      );
+      const fileBlocks = pendingFiles.map((f, i) =>
+        `**${f.name}**\n\`\`\`\n${fileContents[i]}\n\`\`\``
       ).join('\n\n');
       fullContent = fileBlocks + (text ? '\n\n' + text : '');
     }

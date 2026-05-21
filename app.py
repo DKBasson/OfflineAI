@@ -1,4 +1,5 @@
 import asyncio
+import atexit
 import json
 import os
 import platform
@@ -23,10 +24,30 @@ AUTH_REQUIRED = LAN_MODE and bool(AUTH_TOKEN)
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 STATIC_DIR = Path(__file__).parent / "static"
 FRONTEND_DIR = Path(__file__).parent / "frontend"
-MAX_BODY   = 50 * 1024 * 1024  # 50 MB
+MAX_BODY   = 50 * 1024 * 1024
 FALLBACK_MODEL = "gemma4:e4b"
 
-# Cache static files at startup
+_TOKEN_STATS_FILE = Path(__file__).parent / "token_stats.json"
+
+def _load_token_stats() -> dict:
+    try:
+        if _TOKEN_STATS_FILE.exists():
+            raw = json.loads(_TOKEN_STATS_FILE.read_text(encoding="utf-8"))
+            return {k: v for k, v in raw.items()
+                    if isinstance(v, list) and len(v) == 2
+                    and all(isinstance(x, (int, float)) for x in v)}
+    except Exception:
+        pass
+    return {}
+
+def _save_token_stats() -> None:
+    try:
+        _TOKEN_STATS_FILE.write_text(json.dumps(_token_stats), encoding="utf-8")
+    except Exception:
+        pass
+
+_token_stats: dict[str, list[int]] = _load_token_stats()
+
 _BASE = Path(__file__).parent
 _INDEX_HTML = (_BASE / "index.html").read_text(encoding="utf-8")
 _STYLES_CSS = (_BASE / "styles.css").read_text(encoding="utf-8")
@@ -273,13 +294,105 @@ async def stream_ollama_response(path: str, body: dict, *, write_timeout: float)
         yield _ndjson_error(str(exc))
 
 
+def _token_table_lines(active: str | None, prompt_req: int, completion_req: int) -> list[str]:
+    stats    = _token_stats
+    name_col = max(15, max((len(k) for k in stats), default=0) + 4)
+    total_p  = sum(v[0] for v in stats.values())
+    total_c  = sum(v[1] for v in stats.values())
+    grand    = total_p + total_c
+    W = name_col + 39
+    C = "─"
+    if active is not None:
+        head = f" Token Usage  ·  +{prompt_req + completion_req:,} this request "
+    else:
+        head = " Session Token Summary  ·  Server Shutdown "
+    head = head.center(W)
+    lines = [
+        f"┌{C * W}┐",
+        f"│{head}│",
+        f"├{C * name_col}┬{C * 12}┬{C * 12}┬{C * 12}┤",
+        f"│ {'Client':<{name_col - 2}} │ {'Prompt':>10} │ {'Completion':>10} │ {'Total':>10} │",
+        f"├{C * name_col}┼{C * 12}┼{C * 12}┼{C * 12}┤",
+    ]
+    for name, (p, c) in sorted(stats.items(), key=lambda x: -(x[1][0] + x[1][1])):
+        marker = " ◀" if name == active else ""
+        lines.append(
+            f"│ {(name + marker):<{name_col - 2}} │ {p:>10,} │ {c:>10,} │ {p + c:>10,} │"
+        )
+    lines += [
+        f"├{C * name_col}┼{C * 12}┼{C * 12}┼{C * 12}┤",
+        f"│ {'TOTAL':<{name_col - 2}} │ {total_p:>10,} │ {total_c:>10,} │ {grand:>10,} │",
+        f"└{C * name_col}┴{C * 12}┴{C * 12}┴{C * 12}┘",
+    ]
+    return lines
+
+
+def _print_token_table(display_name: str, prompt_req: int, completion_req: int) -> None:
+    print("\n" + "\n".join(_token_table_lines(display_name, prompt_req, completion_req)))
+
+
+def _print_shutdown_summary() -> None:
+    if not _token_stats:
+        return
+    print("\n" + "\n".join(_token_table_lines(None, 0, 0)))
+
+
+atexit.register(_print_shutdown_summary)
+
+
+def _tally_done_line(line: bytes, display_name: str) -> None:
+    line = line.strip()
+    if not line:
+        return
+    try:
+        data = json.loads(line)
+        if data.get("done"):
+            prompt_req     = data.get("prompt_eval_count", 0)
+            completion_req = data.get("eval_count", 0)
+            entry = _token_stats.setdefault(display_name, [0, 0])
+            entry[0] += prompt_req
+            entry[1] += completion_req
+            _save_token_stats()
+            _print_token_table(display_name, prompt_req, completion_req)
+    except (json.JSONDecodeError, AttributeError):
+        pass
+
+
+async def _chat_stream_with_token_log(body: dict, client_host: str):
+    display_name = body.get("user", "").strip() or client_host
+    ollama_body  = {k: v for k, v in body.items() if k != "user"}
+    buf = b""
+    async for chunk in stream_ollama_response("/api/chat", ollama_body, write_timeout=120.0):
+        buf += chunk
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            _tally_done_line(line, display_name)
+        yield chunk
+    if buf.strip():
+        _tally_done_line(buf, display_name)
+
+
 @app.post("/api/chat")
 async def chat(request: Request):
     body = await request.json()
+    client_host = request.client.host if request.client else "unknown"
     return StreamingResponse(
-        stream_ollama_response("/api/chat", body, write_timeout=120.0),
+        _chat_stream_with_token_log(body, client_host),
         media_type="application/x-ndjson",
     )
+
+
+@app.get("/api/tokens")
+async def get_tokens():
+    return JSONResponse(_token_stats)
+
+
+@app.delete("/api/tokens")
+async def reset_user_tokens(user: str = ""):
+    if user and user in _token_stats:
+        _token_stats[user] = [0, 0]
+        _save_token_stats()
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/pull")
@@ -300,7 +413,6 @@ if __name__ == "__main__":
 
     lan_ip = None
     if host in {"0.0.0.0", "::"}:
-        # Resolve the LAN IP for display (UDP trick; no payload is sent)
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
