@@ -44,6 +44,7 @@ for i in {1..10}; do
 done
 
 echo "✔ App running"
+echo "   Audio transcription · Word/ODF docs · Code files · Images (vision models)"
 LOCAL_URL="http://127.0.0.1:${OFFLINEAI_PORT}"
 [[ -n "${OFFLINEAI_TOKEN:-}" ]] && LOCAL_URL="${LOCAL_URL}?token=${OFFLINEAI_TOKEN}"
 echo "   Local:   ${LOCAL_URL}"

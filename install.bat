@@ -42,6 +42,11 @@ python -m pip install -q --upgrade pip
 python -m pip install -q -r "%SCRIPT_DIR%\requirements.txt"
 echo [OK] Python dependencies installed
 
+:: ── Pre-download Whisper model (audio transcription) ────────────────
+echo.
+echo [>>] Pre-downloading Whisper 'tiny' model for audio transcription (~75 MB)...
+"%SCRIPT_DIR%\.venv\Scripts\python.exe" -c "from faster_whisper import WhisperModel; WhisperModel('tiny', device='cpu', compute_type='int8'); print('[OK] Whisper model ready')" 2>nul || echo [!] Whisper model skipped -- will download automatically on first audio upload
+
 :: ── 3. Ollama ─────────────────────────────────────────────────────
 where ollama >nul 2>&1
 if errorlevel 1 (
@@ -107,6 +112,13 @@ echo.
 echo ==========================================
 echo   [OK] Installation complete!
 echo   Run the app with:  start.bat
+echo.
+echo   Features enabled:
+echo     * Chat with local AI models via Ollama
+echo     * Image attachments (vision models)
+echo     * Audio transcription (.mp3 .wav .opus .m4a ...)
+echo     * Document reading (.docx .odt .ods .odp)
+echo     * Code ^& text file attachments
 echo ==========================================
 echo.
 pause

@@ -33,7 +33,9 @@
 
   // File-type constants
   const IMAGE_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp';
-  const TEXT_ACCEPT  = '.txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.csv,.xml,.yaml,.yml,.sh,.bash,.html,.css,.java,.c,.cpp,.h,.rs,.go,.rb,.php,.swift,.kt,.sql,.toml,.ini,.conf,.env,.log';
+  const TEXT_ACCEPT  = '.txt,.md,.py,.js,.ts,.jsx,.tsx,.json,.csv,.xml,.yaml,.yml,.sh,.bash,.html,.css,.java,.c,.cpp,.h,.rs,.go,.rb,.php,.swift,.kt,.sql,.toml,.ini,.conf,.env,.log,.tex,.rst,.adoc,.diff,.patch,.properties,.cfg,.vue,.svelte,.cs,.vb,.fs,.r,.lua,.ps1,.ex,.exs,.hs,.nim,.zig,.proto';
+  const DOC_ACCEPT   = '.docx,.odt,.ods,.odp,.pdf';
+  const AUDIO_ACCEPT = '.mp3,.wav,.ogg,.opus,.m4a,.webm,.flac,.aac,.wma,.aiff,.alac';
   const CLIENT_BODY_LIMIT = 45 * 1024 * 1024;
   // Capability cache: modelName → { vision: bool }
   const modelCaps = {};
@@ -123,6 +125,7 @@
   let messages            = [];
   let pendingImages       = [];
   let pendingFiles        = []; // { name, content (text) }
+  let pendingAudio        = []; // { name, file }
   let isStreaming         = false;
   let abortCtrl           = null;
   let streamEl            = null;
@@ -348,10 +351,12 @@
   }
 
   async function updateAttachForModel(model) {
+    // Set text/doc/audio types synchronously so the picker is correct before
+    // the model-caps fetch resolves (avoids image-only window on slow start).
+    const base = TEXT_ACCEPT + ',' + DOC_ACCEPT + ',' + AUDIO_ACCEPT;
+    fileInput.accept = base;
     const caps = await fetchModelCaps(model);
-    fileInput.accept = caps.vision
-      ? IMAGE_ACCEPT + ',' + TEXT_ACCEPT
-      : TEXT_ACCEPT;
+    fileInput.accept = (caps.vision ? IMAGE_ACCEPT + ',' : '') + base;
   }
 
   async function fetchModelNames(selectedModel = activeModel) {
@@ -804,6 +809,9 @@
     settingsOver.addEventListener('click', closeSettings);
     settingsSave.addEventListener('click', saveSettingsUI);
     restartOllamaBtn.addEventListener('click', restartOllama);
+    // Reset token counter is only meaningful on the host machine; hide it for network clients.
+    const isLocalhost = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+    if (!isLocalhost) resetTokensBtn.style.display = 'none';
     resetTokensBtn.addEventListener('click', async () => {
       if (!activeUsername) return;
       await fetch(`/api/tokens?user=${encodeURIComponent(activeUsername)}`, {
@@ -1089,6 +1097,8 @@
           const dataUrl = await readImageDataUrl(file);
           pendingImages.push({ dataUrl, base64: dataUrl.split(',')[1] });
         }
+      } else if (file.type.startsWith('audio/') || /\.(mp3|wav|ogg|opus|m4a|flac|aac|webm)$/i.test(file.name)) {
+        pendingAudio.push({ name: file.name, file });
       } else {
         pendingFiles.push({ name: file.name, file });
       }
@@ -1120,9 +1130,76 @@
     });
   }
 
+  const DOC_FILE_RE = /\.(docx|odt|ods|odp|pdf)$/i;
+
+  function readFileContent(f) {
+    return DOC_FILE_RE.test(f.name) ? extractDocText(f.file, f.name) : readTextFile(f.file);
+  }
+
+  async function extractDocText(file, name) {
+    const form = new FormData();
+    form.append('file', file, name);
+    const r = await fetch('/api/extract', { method: 'POST', headers: authHeaders(), body: form });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      throw new Error(data.error || `Extraction failed (${r.status})`);
+    }
+    const data = await r.json();
+    return data.text;
+  }
+
+  async function transcribeWithProgress({ file, name }, chipEl) {
+    // Inject a progress bar into the chip and update it via SSE.
+    const label = chipEl?.querySelector('.file-thumb-name');
+    let bar = null;
+    if (chipEl) {
+      bar = document.createElement('div');
+      bar.className = 'transcribe-bar';
+      chipEl.appendChild(bar);
+      if (label) label.textContent = '\uD83C\uDF99\uFE0F 0%';
+    }
+
+    const form = new FormData();
+    form.append('file', file, name);
+    const r = await fetch('/api/transcribe', { method: 'POST', headers: authHeaders(), body: form });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || `Transcription failed (${r.status})`);
+    }
+
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let transcript = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+        if (evt.type === 'progress') {
+          if (label) label.textContent = `\uD83C\uDF99\uFE0F ${evt.percent}%`;
+          if (bar) bar.style.width = `${evt.percent}%`;
+        } else if (evt.type === 'done') {
+          transcript = evt.transcript;
+          if (label) label.textContent = '\u2713 Done';
+          if (bar) bar.style.width = '100%';
+        } else if (evt.type === 'error') {
+          throw new Error(evt.error);
+        }
+      }
+    }
+    return transcript;
+  }
+
   function renderPreviews() {
     previewsEl.innerHTML = '';
-    if (!pendingImages.length && !pendingFiles.length) { previewsEl.style.display = 'none'; return; }
+    if (!pendingImages.length && !pendingFiles.length && !pendingAudio.length) { previewsEl.style.display = 'none'; return; }
     previewsEl.style.display = 'flex';
     pendingImages.forEach((img, i) => {
       const div = document.createElement('div');
@@ -1147,6 +1224,21 @@
       rm.className = 'rm-img'; rm.textContent = '×';
       rm.setAttribute('aria-label', 'Remove file');
       rm.addEventListener('click', () => { pendingFiles.splice(i, 1); renderPreviews(); });
+      div.appendChild(label); div.appendChild(rm);
+      previewsEl.appendChild(div);
+    });
+    pendingAudio.forEach((a, i) => {
+      const div = document.createElement('div');
+      div.className = 'img-thumb file-thumb audio-chip';
+      div.dataset.audioIdx = String(i);
+      div.title = a.name;
+      const label = document.createElement('span');
+      label.className = 'file-thumb-name';
+      label.textContent = '\uD83C\uDFB5 ' + a.name;
+      const rm = document.createElement('button');
+      rm.className = 'rm-img'; rm.textContent = '\xD7';
+      rm.setAttribute('aria-label', 'Remove audio file');
+      rm.addEventListener('click', () => { pendingAudio.splice(i, 1); renderPreviews(); });
       div.appendChild(label); div.appendChild(rm);
       previewsEl.appendChild(div);
     });
@@ -1323,18 +1415,44 @@
   async function sendMessage() {
     if (isStreaming) return;
     const text = inputEl.value.trim();
-    if (!text && !pendingImages.length && !pendingFiles.length) return;
+    if (!text && !pendingImages.length && !pendingFiles.length && !pendingAudio.length) return;
 
     // Prepend attached text files as code blocks in the message content
     let fullContent = text;
     if (pendingFiles.length) {
       const fileContents = await Promise.all(
-        pendingFiles.map(f => readTextFile(f.file).catch(() => ''))
+        pendingFiles.map(f => readFileContent(f).catch(() => ''))
       );
       const fileBlocks = pendingFiles.map((f, i) =>
         `**${f.name}**\n\`\`\`\n${fileContents[i]}\n\`\`\``
       ).join('\n\n');
-      fullContent = fileBlocks + (text ? '\n\n' + text : '');
+      fullContent = fileBlocks + (fullContent ? '\n\n' + fullContent : '');
+    }
+
+    if (pendingAudio.length) {
+      // Grab chip elements now (they'll be cleared by renderPreviews after send).
+      const chipEls = [...previewsEl.querySelectorAll('.audio-chip')];
+      // Block the UI while transcribing.
+      sendBtn.disabled = true;
+      attachBtn.disabled = true;
+      inputEl.disabled = true;
+      try {
+        const transcripts = await Promise.all(
+          pendingAudio.map((a, i) =>
+            transcribeWithProgress(a, chipEls[i] ?? null).catch(() => null)
+          )
+        );
+        const audioBlocks = pendingAudio.map((a, i) =>
+          transcripts[i] != null
+            ? `**[Audio transcript: ${a.name}]**\n${transcripts[i]}`
+            : `**[Audio file attached: ${a.name}]** *(transcription unavailable)*`
+        ).join('\n\n');
+        fullContent = audioBlocks + (fullContent ? '\n\n' + fullContent : '');
+      } finally {
+        sendBtn.disabled = false;
+        attachBtn.disabled = false;
+        inputEl.disabled = false;
+      }
     }
 
     const imgs    = [...pendingImages];
@@ -1348,6 +1466,7 @@
     autoResize(inputEl);
     pendingImages = [];
     pendingFiles  = [];
+    pendingAudio  = [];
     renderPreviews();
 
     appendUserBubble(userMsg, imgs, messages.length - 1);

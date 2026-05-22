@@ -6,12 +6,54 @@ import platform
 import shlex
 import shutil
 import subprocess
+import tempfile
+import threading
 import time
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
+
+try:
+    from faster_whisper import WhisperModel as _WhisperModel
+    _WHISPER_AVAILABLE = True
+except ImportError:
+    _WHISPER_AVAILABLE = False
+
+try:
+    import docx as _docx_module
+    _DOCX_AVAILABLE = True
+except ImportError:
+    _DOCX_AVAILABLE = False
+
+try:
+    from odf.opendocument import load as _odf_load
+    from odf.teletype import extractText as _odf_extract_text
+    from odf import text as _odf_text
+    _ODF_AVAILABLE = True
+except ImportError:
+    _ODF_AVAILABLE = False
+
+try:
+    import pypdf as _pypdf
+    _PDF_AVAILABLE = True
+except ImportError:
+    _PDF_AVAILABLE = False
+
+_WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL", "tiny")
+_whisper_model: object = None
+_whisper_lock = asyncio.Lock()
+
+
+async def _get_whisper() -> object:
+    global _whisper_model
+    async with _whisper_lock:
+        if _whisper_model is None:
+            _whisper_model = await asyncio.to_thread(
+                _WhisperModel, _WHISPER_MODEL_SIZE, device="cpu", compute_type="int8"
+            )
+    return _whisper_model
 
 app = FastAPI(title="OfflineAI")
 
@@ -179,7 +221,7 @@ async def _wait_for_ollama_ready(timeout: float = 12.0) -> tuple[bool, str]:
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    return HTMLResponse(_INDEX_HTML)
+    return HTMLResponse((_BASE / "index.html").read_text(encoding="utf-8"))
 
 
 @app.get("/styles.css")
@@ -266,6 +308,134 @@ async def show_model(request: Request):
             return r.json()
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
+
+
+@app.post("/api/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Stream transcription progress for an audio file using faster-whisper (SSE)."""
+    if not _WHISPER_AVAILABLE:
+        return JSONResponse(
+            {"error": "Audio transcription requires faster-whisper. Install with: pip install faster-whisper"},
+            status_code=501,
+        )
+    suffix = Path(file.filename).suffix if file.filename else ".wav"
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    # Load (or reuse) the model before spawning the worker thread.
+    model = await _get_whisper()
+
+    async def event_stream():
+        q: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def _run():
+            try:
+                segments_iter, info = model.transcribe(tmp_path, beam_size=5)
+                duration = max(info.duration or 0, 0.001)
+                texts: list[str] = []
+                for seg in segments_iter:
+                    texts.append(seg.text)
+                    pct = min(99, int(seg.end / duration * 100))
+                    loop.call_soon_threadsafe(
+                        q.put_nowait, {"type": "progress", "percent": pct}
+                    )
+                loop.call_soon_threadsafe(
+                    q.put_nowait,
+                    {"type": "done", "transcript": " ".join(texts).strip()},
+                )
+            except Exception as exc:
+                loop.call_soon_threadsafe(
+                    q.put_nowait, {"type": "error", "error": str(exc)}
+                )
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+
+        threading.Thread(target=_run, daemon=True).start()
+
+        while True:
+            item = await q.get()
+            yield f"data: {json.dumps(item)}\n\n"
+            if item["type"] in ("done", "error"):
+                break
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/extract")
+async def extract_document(file: UploadFile = File(...)):
+    """Extract plain text from a Word (.docx) or ODF (.odt/.ods/.odp) document."""
+    suffix = Path(file.filename).suffix.lower() if file.filename else ""
+    content = await file.read()
+
+    if suffix == ".docx":
+        if not _DOCX_AVAILABLE:
+            return JSONResponse(
+                {"error": "python-docx is required. Install with: pip install python-docx"},
+                status_code=501,
+            )
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            def _read_docx():
+                doc = _docx_module.Document(tmp_path)
+                return "\n".join(p.text for p in doc.paragraphs)
+            text = await asyncio.to_thread(_read_docx)
+            return {"text": text}
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    elif suffix in {".odt", ".ods", ".odp"}:
+        if not _ODF_AVAILABLE:
+            return JSONResponse(
+                {"error": "odfpy is required. Install with: pip install odfpy"},
+                status_code=501,
+            )
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            def _read_odf():
+                odoc = _odf_load(tmp_path)
+                paragraphs = odoc.getElementsByType(_odf_text.P)
+                return "\n".join(_odf_extract_text(p) for p in paragraphs)
+            text = await asyncio.to_thread(_read_odf)
+            return {"text": text}
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    elif suffix == ".pdf":
+        if not _PDF_AVAILABLE:
+            return JSONResponse(
+                {"error": "pypdf is required. Install with: pip install pypdf"},
+                status_code=501,
+            )
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            def _read_pdf():
+                reader = _pypdf.PdfReader(tmp_path)
+                return "\n".join(
+                    page.extract_text() or "" for page in reader.pages
+                ).strip()
+            text = await asyncio.to_thread(_read_pdf)
+            return {"text": text}
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    else:
+        return JSONResponse(
+            {"error": f"Unsupported document format: '{suffix}'. Supported: .docx, .odt, .ods, .odp, .pdf"},
+            status_code=415,
+        )
 
 
 def _ndjson_error(message: str) -> bytes:

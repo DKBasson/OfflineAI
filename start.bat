@@ -57,6 +57,7 @@ exit /b 1
 
 :app_ready
 echo [OK] App running
+echo    Audio transcription * Word/ODF docs * Code files * Images (vision models)
 set "LOCAL_URL=http://127.0.0.1:%OFFLINEAI_PORT%"
 if defined OFFLINEAI_TOKEN set "LOCAL_URL=!LOCAL_URL!?token=!OFFLINEAI_TOKEN!"
 echo    Local:   !LOCAL_URL!
