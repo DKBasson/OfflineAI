@@ -4,8 +4,6 @@ A local-first AI chat app that runs entirely on your device. No cloud, no subscr
 
 Built with [Ollama](https://ollama.com), FastAPI, and a React/TypeScript frontend.
 
-![OfflineAI Screenshot](https://github.com/DKBasson/OfflineAI/raw/main/screenshot.png)
-
 ---
 
 ## Features
