@@ -36,13 +36,13 @@ Built with [Ollama](https://ollama.com), FastAPI, and a React/TypeScript fronten
 - macOS (Apple Silicon or Intel)
 - [Homebrew](https://brew.sh) (installed automatically if missing)
 - Python 3.10+
-- ~4 GB free disk space for the model
+- ~20 GB free disk space for models
 
 ### Windows
 - Windows 10 or 11
 - [Python 3.10+](https://www.python.org/downloads/) — check **"Add Python to PATH"** during install
 - [Ollama for Windows](https://ollama.com/download/windows) — install before running `scripts\install.bat`
-- ~4 GB free disk space for the model
+- ~20 GB free disk space for models
 
 ---
 
