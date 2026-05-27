@@ -1567,8 +1567,6 @@
 
   async function refineImagePrompt(text, signal) {
     const contextSummary = buildImageRefinementContext(text);
-    console.log(`[Image] Enhancing prompt via text model: "${activeModel}" — ${contextSummary.split('\n').length} context lines`);
-
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -1619,7 +1617,6 @@
     const refined = content.trim();
     if (!refined) throw new Error(`Text model "${activeModel}" returned empty content for prompt enhancement`);
 
-    console.log(`[Image] Enhanced prompt: "${refined.slice(0, 150)}${refined.length > 150 ? '\u2026' : ''}"`);
     fetchAndRenderTokens();
     return refined;
   }
@@ -1756,14 +1753,11 @@
     const assistantRow = appendThinking();
 
     try {
-      console.log(`[Image] Request received: "${text}"`);
       let refinedPrompt = text;
       try {
         refinedPrompt = await refineImagePrompt(text, abortCtrl.signal);
-        console.log(`[Image] Prompt refined: "${text}" → "${refinedPrompt}"`);
       } catch (e) {
         if (e.name === 'AbortError') throw e;
-        console.error('[Image] Prompt enhancement FAILED:', e.message);
         // Show a visible warning but still proceed with the original prompt
         assistantRow.querySelector('.thinking')?.replaceWith((() => {
           const w = document.createElement('div');
@@ -1777,7 +1771,6 @@
       const imageModel = getSettings().imageModel;
       if (!imageModel) throw new Error('No image model configured. Go to Settings → Image generation model and select or pull one (e.g. x/z-image-turbo).');
       const generationModel = await resolveImageGenerationModel(imageModel, abortCtrl.signal);
-      console.log(`[Image] Starting generation — model: ${generationModel}, prompt: "${refinedPrompt}"`);
       const { progressWrap, labelEl, barEl, msgBody } = createImageProgressUI(assistantRow, generationModel);
 
       const { generatedB64, textOnlyOutput, lastPayloadKeys } = await generateImageBase64({
@@ -1796,16 +1789,13 @@
       if (!generatedB64) {
         const textOut = textOnlyOutput.trim();
         if (textOut) {
-          console.warn(`[Image] Model '${generationModel}' returned text instead of an image. Response: "${textOut.slice(0, 200)}"`);
           throw new Error(`Model '${generationModel}' returned text instead of image. Select an image model in Settings (e.g. x/z-image-turbo:latest).`);
         }
-        console.warn(`[Image] No image returned. Last payload keys: ${lastPayloadKeys || '(none)'}`);
         const details = lastPayloadKeys ? ` Last payload keys: ${lastPayloadKeys}.` : '';
         throw new Error(`No image was returned. Make sure the image model is pulled and supports image generation.${details}`);
       }
 
-      console.log(`[Image] Image received (base64 length: ${generatedB64.length} chars). Rendering…`);
-      // Step 4: Replace progress indicator with the generated image
+      // Replace progress indicator with the generated image
       progressWrap.remove();
       const imgWrap = document.createElement('div');
       imgWrap.className = 'msg-generated-image';
