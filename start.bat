@@ -6,9 +6,24 @@ set "SCRIPT_DIR=%~dp0"
 set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 cd /d "%SCRIPT_DIR%"
 
-if not defined OFFLINEAI_HOST set "OFFLINEAI_HOST=127.0.0.1"
+:: ── Network access prompt ────────────────────────────────────────
+if not defined OFFLINEAI_HOST (
+    echo.
+    echo   Allow network access?
+    echo   Other devices on your LAN will be able to connect to OfflineAI.
+    echo   A secure token will be generated automatically when enabled.
+    set /p "_NETWORK_REPLY=  [y/N]: "
+    if /i "!_NETWORK_REPLY!"=="y" (
+        set "OFFLINEAI_HOST=0.0.0.0"
+        echo   [OK] Network access enabled
+    ) else (
+        set "OFFLINEAI_HOST=127.0.0.1"
+        echo   [OK] Local-only access (default)
+    )
+    echo.
+)
+
 if not defined OFFLINEAI_PORT set "OFFLINEAI_PORT=8080"
-if not defined OFFLINEAI_IMAGE_MAX_WIDTH set "OFFLINEAI_IMAGE_MAX_WIDTH=1024"
 if not defined OFFLINEAI_IMAGE_MAX_HEIGHT set "OFFLINEAI_IMAGE_MAX_HEIGHT=1024"
 if not defined OFFLINEAI_IMAGE_MAX_STEPS set "OFFLINEAI_IMAGE_MAX_STEPS=16"
 if not defined OFFLINEAI_IMAGE_DEFAULT_WIDTH set "OFFLINEAI_IMAGE_DEFAULT_WIDTH=640"

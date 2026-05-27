@@ -9,7 +9,6 @@ if [[ ! -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
   exit 1
 fi
 
-: ${OFFLINEAI_HOST:=127.0.0.1}
 : ${OFFLINEAI_PORT:=8080}
 : ${OFFLINEAI_IMAGE_MAX_WIDTH:=1024}
 : ${OFFLINEAI_IMAGE_MAX_HEIGHT:=1024}
@@ -17,6 +16,25 @@ fi
 : ${OFFLINEAI_IMAGE_DEFAULT_WIDTH:=640}
 : ${OFFLINEAI_IMAGE_DEFAULT_HEIGHT:=640}
 : ${OFFLINEAI_IMAGE_DEFAULT_STEPS:=6}
+
+# ── Network access prompt ─────────────────────────────────────────
+if [[ -z "${OFFLINEAI_HOST:-}" ]]; then
+  echo ""
+  echo "  Allow network access?"
+  echo "  Other devices on your LAN will be able to connect to OfflineAI."
+  echo "  A secure token will be generated automatically when enabled."
+  printf "  [y/N]: "
+  read -r _NETWORK_REPLY
+  if [[ "${_NETWORK_REPLY:-}" =~ ^[Yy]$ ]]; then
+    OFFLINEAI_HOST="0.0.0.0"
+    echo "  ✔ Network access enabled"
+  else
+    OFFLINEAI_HOST="127.0.0.1"
+    echo "  ✔ Local-only access (default)"
+  fi
+  echo ""
+fi
+
 if [[ "$OFFLINEAI_HOST" == "0.0.0.0" || "$OFFLINEAI_HOST" == "::" ]]; then
   : ${OFFLINEAI_TOKEN:=$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')}
 fi
@@ -24,6 +42,7 @@ export OFFLINEAI_HOST OFFLINEAI_PORT
 export OFFLINEAI_IMAGE_MAX_WIDTH OFFLINEAI_IMAGE_MAX_HEIGHT OFFLINEAI_IMAGE_MAX_STEPS
 export OFFLINEAI_IMAGE_DEFAULT_WIDTH OFFLINEAI_IMAGE_DEFAULT_HEIGHT OFFLINEAI_IMAGE_DEFAULT_STEPS
 [[ -n "${OFFLINEAI_TOKEN:-}" ]] && export OFFLINEAI_TOKEN
+unset _NETWORK_REPLY
 
 # ── Ollama ────────────────────────────────────────────────────────
 if ! pgrep -x "ollama" > /dev/null 2>&1; then

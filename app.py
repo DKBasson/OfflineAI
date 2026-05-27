@@ -98,11 +98,17 @@ _token_stats: dict[str, list[int]] = _load_token_stats()
 
 _BASE = Path(__file__).parent
 _STYLES_CSS = (_BASE / "styles.css").read_text(encoding="utf-8")
+_REACT_DIST = _BASE / "react-dist"
+_REACT_MODE = _REACT_DIST.is_dir() and (_REACT_DIST / "index.html").is_file()
 
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-if FRONTEND_DIR.is_dir():
+if _REACT_MODE:
+    _react_assets = _REACT_DIST / "assets"
+    if _react_assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_react_assets)), name="react-assets")
+elif FRONTEND_DIR.is_dir():
     app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
 
 
@@ -226,6 +232,8 @@ async def _wait_for_ollama_ready(timeout: float = 12.0) -> tuple[bool, str]:
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
+    if _REACT_MODE:
+        return HTMLResponse((_REACT_DIST / "index.html").read_text(encoding="utf-8"))
     return HTMLResponse((_BASE / "index.html").read_text(encoding="utf-8"))
 
 
