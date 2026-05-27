@@ -139,6 +139,10 @@ echo     * Image attachments (vision models)
 echo     * Audio transcription (.mp3 .wav .opus .m4a ...)
 echo     * Document reading (.docx .odt .ods .odp)
 echo     * Code ^& text file attachments
+echo.
+echo   On first start you will be asked whether to allow
+echo   network access (LAN). You can also pre-set it by
+echo   running:  set OFFLINEAI_HOST=0.0.0.0 ^&^& start.bat
 echo ==========================================
 echo.
 pause
