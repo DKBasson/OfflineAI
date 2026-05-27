@@ -218,17 +218,41 @@ Runtime environment variables:
 ## Tests
 
 ```bash
-# Backend tests
+# Backend unit tests
 python -m pytest
 
-# React unit tests
+# React component & utility unit tests
 cd react-app && npm test
 
-# Browser smoke tests
-npm install && npm run test:ui
+# End-to-end browser tests (90 tests, requires the server to be stopped first)
+npm run test:ui
 ```
 
-The backend tests cover the UI route, Ollama-offline fallback behaviour, request size limits, and LAN token auth. The React tests cover components and utility functions.
+The **backend tests** cover the UI route, Ollama-offline fallback behaviour, request size limits, and LAN token auth.
+
+The **React unit tests** cover individual components (`MessageBubble`, `MessageInput`, `Sidebar`, modals) and utility functions (API helpers, file handling, markdown rendering, local storage).
+
+The **Playwright E2E suite** (90 tests) covers the full user journey end-to-end:
+
+| Section | What is tested |
+|---|---|
+| Smoke | Page loads, key elements present |
+| Name modal | Submit, dismiss, Escape lock, 32-char truncation |
+| Connection status | Online/offline/LAN states, tooltip |
+| Token counter | Starts at 0, k-suffix formatting, visibility |
+| Welcome screen | Greeting, model shown, hides/reappears on chat |
+| Chat | Send, streaming, empty-input guard, error bubble, copy, regenerate, avatars |
+| New chat | Clears messages, resets model |
+| Settings panel | All fields, save, defaults, model health, Ollama restart, downloaded models |
+| Model selection | Selector present, persists per conversation |
+| History sidebar | Open/close, Cmd+L toggle, search, load, delete conversations |
+| Keyboard shortcuts modal | Open via button/`?`, close via button/Escape/backdrop |
+| System prompts | Add, delete, duplicate, star default, edit, appears in selector |
+| Model pull | Status messages, Enter key, clears input on success, error state |
+| Danger zone | Cancel keeps history, confirm clears history |
+| Export | Button visible, Cmd+E, click triggers Markdown download |
+| Focus mode | Cmd+Shift+F toggles `focus-mode` class on body |
+| Keyboard focus shortcuts | Cmd+K, Cmd+/, Cmd+E, Cmd+L via keyboard |
 
 ---
 

@@ -140,6 +140,7 @@ interface AppActions {
   refreshModels: () => Promise<void | string[]>;
   refreshDownloadedModels: () => Promise<void>;
   updateModelHealth: () => Promise<void>;
+  savedPromptsVersion: number;
 }
 
 type AppContextValue = AppState & AppActions;
@@ -189,6 +190,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [pullImageStatus, setPullImageStatus] = useState('');
   const [ollamaRestartStatus, setOllamaRestartStatus] = useState('');
   const [modelHealth, setModelHealth] = useState<AppState['modelHealth']>(null);
+  const [savedPromptsVersion, setSavedPromptsVersion] = useState(0);
 
   const historyDbRef = useRef<IDBDatabase | null>(null);
   const abortCtrlRef = useRef<AbortController | null>(null);
@@ -357,6 +359,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         prompts.push({ id: String(Date.now()), name: prompt.name, content: prompt.content });
       }
       saveSystemPrompts(prompts);
+      setSavedPromptsVersion((v) => v + 1);
     },
     [currentSystemPromptId],
   );
@@ -375,6 +378,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setCurrentSystemPrompt('');
         setCurrentSystemPromptId('');
       }
+      setSavedPromptsVersion((v) => v + 1);
     },
     [currentSystemPromptId, getSettings],
   );
@@ -384,6 +388,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (to < 0 || to >= prompts.length) return;
     [prompts[from], prompts[to]] = [prompts[to], prompts[from]];
     saveSystemPrompts(prompts);
+    setSavedPromptsVersion((v) => v + 1);
   }, []);
 
   const duplicatePrompt = useCallback((index: number) => {
@@ -392,6 +397,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!p) return;
     prompts.splice(index + 1, 0, { id: String(Date.now()), name: `${p.name} copy`, content: p.content });
     saveSystemPrompts(prompts);
+    setSavedPromptsVersion((v) => v + 1);
   }, []);
 
   const setDefaultPrompt = useCallback(
@@ -1174,6 +1180,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshModels,
     refreshDownloadedModels,
     updateModelHealth,
+    savedPromptsVersion,
   } as AppContextValue;
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

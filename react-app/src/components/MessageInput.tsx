@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { loadSystemPrompts } from '../utils/storage';
 import {
@@ -23,6 +23,7 @@ export function MessageInput() {
     activeModel,
     currentSystemPromptId,
     setSystemPromptById,
+    savedPromptsVersion,
   } = useApp();
 
   const [text, setText] = useState('');
@@ -90,7 +91,8 @@ export function MessageInput() {
     [addFiles],
   );
 
-  const savedPrompts = loadSystemPrompts();
+  // Re-read prompts whenever savedPromptsVersion changes
+  const savedPrompts = useMemo(() => loadSystemPrompts(), [savedPromptsVersion]);
 
   return (
     <div className="shrink-0 px-4 pb-4 pt-2">
@@ -147,6 +149,7 @@ export function MessageInput() {
           <div className="flex items-center gap-2 px-1">
             <span className="text-[11px] text-text-dim shrink-0">Prompt:</span>
             <select
+              id="sp-select"
               className={`flex-1 bg-transparent border border-transparent rounded-sm text-[12px] outline-none cursor-pointer hover:border-border transition-colors ${currentSystemPromptId ? 'text-accent' : 'text-text-dim'}`}
               value={currentSystemPromptId}
               onChange={(e) => setSystemPromptById(e.target.value)}
@@ -211,9 +214,9 @@ export function MessageInput() {
             </button>
           ) : (
             <button
+              id="send-btn"
               className={`send-btn shrink-0 mb-0.5 ${!canSend ? 'opacity-35 cursor-not-allowed' : ''}`}
               onClick={handleSend}
-              disabled={!canSend}
               aria-label="Send message"
               title="Send (Enter)"
             >
