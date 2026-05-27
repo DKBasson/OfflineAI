@@ -585,6 +585,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const refineImagePrompt = useCallback(
     async (text: string, signal: AbortSignal, msgs: Message[]): Promise<string> => {
+      if (!activeModel) {
+        throw new Error(
+          'No chat model selected. Set a text model in Settings to enable prompt enhancement.',
+        );
+      }
+
+      console.group('[OfflineAI] Prompt enhancement');
+      console.log('Model:', activeModel);
+      console.log('Original prompt:', text);
+      const t0 = performance.now();
+
       const contextMsgs = msgs
         .slice(-activeContextSize)
         .map((m) => ({ role: m.role, content: String(m.content || '').trim() }))
@@ -611,17 +622,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           },
         ],
         stream: true,
-        options: { temperature: 0.7, top_p: 0.9, num_predict: 200 },
+        // num_predict intentionally omitted: thinking models (e.g. Gemma 4) consume
+        // reasoning tokens against the limit before producing any output, causing empty
+        // responses. The system prompt already constrains the reply to ≤200 words.
+        options: { temperature: 0.7, top_p: 0.9 },
         ...(activeUsername ? { user: activeUsername } : {}),
       };
 
       let content = '';
+      let chunkCount = 0;
       for await (const chunk of streamChat(body, signal)) {
-        if (chunk.error) throw new Error(chunk.error);
-        if (chunk.content) content += chunk.content;
+        if (chunk.error) {
+          console.error('[OfflineAI] Prompt enhancement — model error:', chunk.error);
+          console.groupEnd();
+          throw new Error(chunk.error);
+        }
+        if (chunk.content) {
+          content += chunk.content;
+          chunkCount++;
+        }
       }
       const refined = content.trim();
-      if (!refined) throw new Error('Text model returned empty content for prompt enhancement');
+      const elapsed = (performance.now() - t0).toFixed(0);
+
+      if (!refined) {
+        console.warn(
+          `[OfflineAI] Prompt enhancement — model "${activeModel}" returned no content after ${chunkCount} chunks.`,
+          'This usually means the selected chat model is not a generative text model (e.g. an embedding or image model was selected). Check Settings → Chat model.',
+        );
+        console.groupEnd();
+        throw new Error(
+          `"${activeModel}" returned no text. Make sure your chat model is a generative text model, not an image or embedding model.`,
+        );
+      }
+
+      console.log(`Enhanced prompt (${elapsed}ms, ${chunkCount} chunks):`, refined);
+      console.groupEnd();
       fetchAndSetTokens();
       return refined;
     },
@@ -635,6 +671,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setImageProgressLabel('Preparing…');
       setStreamingError(null);
 
+      console.group('[OfflineAI] Image generation request');
+      console.log('User prompt:', text);
+
       try {
         abortCtrlRef.current = new AbortController();
         const signal = abortCtrlRef.current.signal;
@@ -643,18 +682,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         let promptWarning: string | null = null;
         try {
           refinedPrompt = await refineImagePrompt(text, signal, msgs);
+          console.log('[OfflineAI] Using enhanced prompt:', refinedPrompt);
         } catch (e: unknown) {
-          if (e instanceof Error && e.name === 'AbortError') throw e;
-          promptWarning = `⚠️ Prompt enhancement failed (${e instanceof Error ? e.message : String(e)}). Using original prompt.`;
+          if (e instanceof Error && e.name === 'AbortError') {
+            console.groupEnd();
+            throw e;
+          }
+          const reason = e instanceof Error ? e.message : String(e);
+          console.warn('[OfflineAI] Prompt enhancement failed — falling back to original.', reason);
+          promptWarning = `⚠️ Prompt enhancement failed (${reason}). Using original prompt.`;
         }
 
         const imageModel = getSettings().imageModel;
         if (!imageModel) {
+          console.error('[OfflineAI] No image model configured.');
+          console.groupEnd();
           throw new Error(
             'No image model configured. Go to Settings → Image generation model and select or pull one.',
           );
         }
 
+        console.log('[OfflineAI] Sending to image model:', imageModel);
         setImageProgressLabel(`Generating image with ${imageModel}…`);
 
         const perf = IMAGE_PERF_PRESETS[getSettings().imagePerfProfile] || IMAGE_PERF_PRESETS.eco;
@@ -705,16 +753,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         );
         setCurrentConvId(newConvId);
 
+        console.log('[OfflineAI] Image generation complete. imageModel:', imageModel);
+        console.groupEnd();
         if (promptWarning) setStreamingError(promptWarning);
         return;
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') {
+          console.log('[OfflineAI] Image generation aborted.');
+          console.groupEnd();
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             return last?.role === 'user' ? prev.slice(0, -1) : prev;
           });
         } else {
           const msg = err instanceof Error ? err.message : String(err);
+          console.error('[OfflineAI] Image generation error:', msg);
+          console.groupEnd();
           setStreamingError(`⚠️ ${msg}`);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
