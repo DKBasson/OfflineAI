@@ -9,7 +9,6 @@ Built with [Ollama](https://ollama.com), FastAPI, and a React/TypeScript fronten
 ## Features
 
 - **Fully offline** — all inference runs locally via Ollama
-- **iOS 26 glass design** — backdrop blur, safe-area insets, mobile-responsive
 - **Conversation history** — persisted locally in browser IndexedDB with search and AI-generated titles
 - **System prompts** — save, duplicate, reorder, and set a default prompt for new conversations
 - **Image & file support** — attach images or text files via picker, drag-and-drop, or paste
