@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 set -e
 
-SCRIPT_DIR="${0:A:h}"
+SCRIPT_DIR="${0:A:h:h}"
 cd "$SCRIPT_DIR"
 
 MODEL="gemma4:e4b"
@@ -162,7 +162,7 @@ echo "✔ Front-end assets ready"
 echo ""
 echo "══════════════════════════════════════════"
 echo "  ✔ Installation complete!"
-echo "  Run the app with:  ./start.sh"
+echo "  Run the app with:  ./scripts/start.sh"
 echo ""
 echo "  Features enabled:"
 echo "    • Chat with local AI models via Ollama"
@@ -173,5 +173,5 @@ echo "    • Code & text file attachments"
 echo ""
 echo "  On first start you will be asked whether to allow"
 echo "  network access (LAN). You can also pre-set it by"
-echo "  running:  OFFLINEAI_HOST=0.0.0.0 ./start.sh"
+echo "  running:  OFFLINEAI_HOST=0.0.0.0 ./scripts/start.sh"
 echo "══════════════════════════════════════════"

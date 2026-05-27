@@ -2,7 +2,7 @@
 
 A local-first AI chat app that runs entirely on your device. No cloud, no subscriptions, no data leaving your machine.
 
-Built with [Ollama](https://ollama.com), FastAPI, and a single-file iOS-style glass UI.
+Built with [Ollama](https://ollama.com), FastAPI, and a React/TypeScript frontend.
 
 ![OfflineAI Screenshot](https://github.com/DKBasson/OfflineAI/raw/main/screenshot.png)
 
@@ -15,6 +15,7 @@ Built with [Ollama](https://ollama.com), FastAPI, and a single-file iOS-style gl
 - **Conversation history** — persisted locally in browser IndexedDB with search and AI-generated titles
 - **System prompts** — save, duplicate, reorder, and set a default prompt for new conversations
 - **Image & file support** — attach images or text files via picker, drag-and-drop, or paste
+- **Image generation** — ask the model to draw or generate an image using a local diffusion model
 - **Per-chat model selection** — choose a different Ollama model for each conversation
 - **Local tuning controls** — adjust temperature, top-p, reply tokens, model context tokens, and saved chat limit
 - **Markdown rendering** — with syntax highlighting and copy-to-clipboard
@@ -26,7 +27,9 @@ Built with [Ollama](https://ollama.com), FastAPI, and a single-file iOS-style gl
 - **LAN access** — opt-in serving to devices on your local network
 - **LAN token auth** — LAN launch scripts generate a one-time access token automatically
 - **Message controls** — copy messages and regenerate the latest assistant response
-- **No CDN at runtime** — all JS/CSS assets vendored locally with checksum verification
+- **Audio transcription** — upload `.mp3`, `.wav`, `.opus`, `.m4a`, and other audio files via Whisper
+- **Document reading** — attach `.docx`, `.odt`, `.ods`, `.odp`, and `.pdf` files
+- **No CDN at runtime** — highlight.js assets vendored locally with checksum verification
 
 ---
 
@@ -41,7 +44,7 @@ Built with [Ollama](https://ollama.com), FastAPI, and a single-file iOS-style gl
 ### Windows
 - Windows 10 or 11
 - [Python 3.10+](https://www.python.org/downloads/) — check **"Add Python to PATH"** during install
-- [Ollama for Windows](https://ollama.com/download/windows) — install before running `install.bat`
+- [Ollama for Windows](https://ollama.com/download/windows) — install before running `scripts\install.bat`
 - ~4 GB free disk space for the model
 
 ---
@@ -56,13 +59,13 @@ git clone https://github.com/DKBasson/OfflineAI.git
 cd OfflineAI
 
 # 2. Run the installer (one-time setup)
-chmod +x install.sh && ./install.sh
+chmod +x scripts/install.sh && ./scripts/install.sh
 
 # 3. Start the app
-chmod +x start.sh && ./start.sh
+./scripts/start.sh
 
 # Optional: expose on your LAN
-OFFLINEAI_HOST=0.0.0.0 ./start.sh
+OFFLINEAI_HOST=0.0.0.0 ./scripts/start.sh
 ```
 
 ### Windows
@@ -73,14 +76,14 @@ git clone https://github.com/DKBasson/OfflineAI.git
 cd OfflineAI
 
 :: 2. Run the installer (one-time setup — run as a regular user, not Administrator)
-install.bat
+scripts\install.bat
 
 :: 3. Start the app
-start.bat
+scripts\start.bat
 
 :: Optional: expose on your LAN
 set OFFLINEAI_HOST=0.0.0.0
-start.bat
+scripts\start.bat
 ```
 
 > **Windows note:** Ollama must be installed manually first from [ollama.com/download/windows](https://ollama.com/download/windows). The installer will check and prompt you if it is missing.
@@ -91,8 +94,9 @@ start.bat
 
 - Installs Homebrew, Python, and Ollama if not already present *(macOS only)*
 - Creates a Python virtual environment and installs dependencies
-- Pulls the `gemma4:e4b` model (~3.5 GB)
-- Downloads frontend assets to `static/`
+- Pulls the `gemma4:e4b` chat model (~3.5 GB) and `x/z-image-turbo` image generation model (~5 GB)
+- Pre-downloads the Whisper `tiny` model for audio transcription (~75 MB)
+- Downloads syntax-highlighting assets to `static/`
 
 After `start.sh` / `start.bat` runs, your browser will open automatically. By default the app only listens on localhost:
 
@@ -134,9 +138,13 @@ That URL includes a `token` query parameter for non-local devices. Localhost rem
 | LLM backend | [Ollama](https://ollama.com) (`gemma4:e4b`) |
 | Web server | [FastAPI](https://fastapi.tiangolo.com) + [uvicorn](https://www.uvicorn.org) |
 | HTTP client | [httpx](https://www.python-httpx.org) (async streaming) |
+| Frontend | [React 18](https://react.dev) + [TypeScript](https://www.typescriptlang.org) + [Vite](https://vitejs.dev) |
+| Styling | [Tailwind CSS](https://tailwindcss.com) v3 |
 | Markdown | [marked.js](https://marked.js.org) v12 |
 | Sanitisation | [DOMPurify](https://github.com/cure53/DOMPurify) v3 |
 | Syntax highlighting | [highlight.js](https://highlightjs.org) 11.9 |
+| Audio transcription | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (Whisper `tiny`) |
+| Document parsing | python-docx, odfpy, pypdf |
 
 ---
 
@@ -144,33 +152,41 @@ That URL includes a `token` query parameter for non-local devices. Localhost rem
 
 ```
 OfflineAI/
-├── app.py            # FastAPI backend — serves UI, proxies Ollama
-├── index.html        # App shell and HTML structure
-├── styles.css        # App stylesheet
-├── frontend/         # Browser-side app behavior
-│   ├── app.js
-│   └── settings-tooltips.js
-├── requirements.txt  # Python dependencies
-├── install.sh        # One-time setup (macOS/Linux)
-├── start.sh          # Launch script (macOS/Linux)
-├── install.bat       # One-time setup (Windows)
-├── start.bat         # Launch script (Windows)
-└── static/           # Vendored frontend assets (generated by installer, gitignored)
+├── app.py              # FastAPI backend — serves UI, proxies Ollama
+├── requirements.txt    # Python dependencies
+├── token_stats.json    # Persisted token counters (auto-created)
+├── scripts/
+│   ├── install.sh      # One-time setup (macOS/Linux)
+│   ├── start.sh        # Launch script (macOS/Linux)
+│   ├── install.bat     # One-time setup (Windows)
+│   └── start.bat       # Launch script (Windows)
+├── react-app/          # Vite + React + TypeScript source
+│   ├── src/
+│   │   ├── App.tsx
+│   │   ├── constants.ts
+│   │   ├── types.ts
+│   │   ├── components/     # UI components
+│   │   ├── context/        # AppContext (global state)
+│   │   └── utils/          # api, storage, markdown, files
+│   └── package.json
+├── react-dist/         # Vite build output (served by FastAPI, gitignored)
+├── static/             # Vendored highlight.js assets (generated by installer, gitignored)
+└── tests/              # Backend and UI tests
 ```
 
 ---
 
 ## Configuration
 
-To change the default model, update the fallback constant in `frontend/app.js` and the model name in the installer:
+To change the default model, update the constant in `react-app/src/constants.ts` and the model name in the installer:
 
-```js
-// frontend/app.js
-const FALLBACK_MODEL = 'gemma4:e4b';
+```ts
+// react-app/src/constants.ts
+export const FALLBACK_MODEL = 'gemma4:e4b';
 ```
 
 ```bash
-# install.sh / install.bat
+# scripts/install.sh / scripts/install.bat
 MODEL="gemma4:e4b"
 ```
 
@@ -205,17 +221,17 @@ Runtime environment variables:
 ## Tests
 
 ```bash
+# Backend tests
 python -m pytest
+
+# React unit tests
+cd react-app && npm test
+
+# Browser smoke tests
+npm install && npm run test:ui
 ```
 
-The backend tests cover the UI route, Ollama-offline fallback behavior, request size limits, and LAN token auth.
-
-Optional browser smoke test:
-
-```bash
-npm install
-npm run test:ui
-```
+The backend tests cover the UI route, Ollama-offline fallback behaviour, request size limits, and LAN token auth. The React tests cover components and utility functions.
 
 ---
 

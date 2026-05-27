@@ -2,7 +2,10 @@
 setlocal EnableDelayedExpansion
 chcp 65001 >nul 2>&1
 
+:: Resolve project root (one level up from scripts\)
 set "SCRIPT_DIR=%~dp0"
+set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+for %%i in ("%SCRIPT_DIR%") do set "SCRIPT_DIR=%%~dpi"
 set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 cd /d "%SCRIPT_DIR%"
 
@@ -53,7 +56,7 @@ echo [OK] Ollama running
 echo [>>] Starting OfflineAI...
 
 if not exist "%SCRIPT_DIR%\.venv\Scripts\python.exe" (
-    echo [!] Virtual environment not found. Run install.bat first.
+    echo [!] Virtual environment not found. Run scripts\install.bat first.
     pause
     exit /b 1
 )

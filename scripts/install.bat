@@ -2,7 +2,10 @@
 setlocal EnableDelayedExpansion
 chcp 65001 >nul 2>&1
 
+:: Resolve project root (one level up from scripts\)
 set "SCRIPT_DIR=%~dp0"
+set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+for %%i in ("%SCRIPT_DIR%") do set "SCRIPT_DIR=%%~dpi"
 set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 cd /d "%SCRIPT_DIR%"
 
@@ -130,7 +133,7 @@ echo [OK] Front-end assets ready
 echo.
 echo ==========================================
 echo   [OK] Installation complete!
-echo   Run the app with:  start.bat
+echo   Run the app with:  scripts\start.bat
 echo.
 echo   Features enabled:
 echo     * Chat with local AI models via Ollama
@@ -142,7 +145,7 @@ echo     * Code ^& text file attachments
 echo.
 echo   On first start you will be asked whether to allow
 echo   network access (LAN). You can also pre-set it by
-echo   running:  set OFFLINEAI_HOST=0.0.0.0 ^&^& start.bat
+echo   running:  set OFFLINEAI_HOST=0.0.0.0 ^&^& scripts\start.bat
 echo ==========================================
 echo.
 pause
