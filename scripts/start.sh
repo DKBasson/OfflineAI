@@ -44,10 +44,25 @@ export OFFLINEAI_IMAGE_DEFAULT_WIDTH OFFLINEAI_IMAGE_DEFAULT_HEIGHT OFFLINEAI_IM
 [[ -n "${OFFLINEAI_TOKEN:-}" ]] && export OFFLINEAI_TOKEN
 unset _NETWORK_REPLY
 
+# ── Cleanup trap (Ctrl+C / SIGTERM) ──────────────────────────────
+_OLLAMA_STARTED=false
+_cleanup() {
+  echo ""
+  echo "▶ Stopping OfflineAI..."
+  [[ -n "${APP_PID:-}" ]] && kill "$APP_PID" 2>/dev/null && wait "$APP_PID" 2>/dev/null
+  if [[ "$_OLLAMA_STARTED" == true ]]; then
+    ollama stop 2>/dev/null || pkill -x ollama 2>/dev/null || true
+  fi
+  echo "✔ Stopped"
+  exit 0
+}
+trap '_cleanup' INT TERM
+
 # ── Ollama ────────────────────────────────────────────────────────
 if ! pgrep -x "ollama" > /dev/null 2>&1; then
   echo "▶ Starting Ollama..."
   ollama serve > /tmp/ollama.log 2>&1 &
+  _OLLAMA_STARTED=true
   # Wait up to 5 s for it to be ready
   for i in {1..10}; do
     sleep 0.5
@@ -97,3 +112,6 @@ if command -v open > /dev/null 2>&1; then
 elif command -v xdg-open > /dev/null 2>&1; then
   xdg-open "$LOCAL_URL" > /dev/null 2>&1 || true
 fi
+
+echo "   Press Ctrl+C to stop."
+wait $APP_PID

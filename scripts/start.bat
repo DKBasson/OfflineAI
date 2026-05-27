@@ -34,10 +34,12 @@ if not defined OFFLINEAI_IMAGE_DEFAULT_HEIGHT set "OFFLINEAI_IMAGE_DEFAULT_HEIGH
 if not defined OFFLINEAI_IMAGE_DEFAULT_STEPS set "OFFLINEAI_IMAGE_DEFAULT_STEPS=6"
 
 :: ── Ollama ────────────────────────────────────────────────────────
+SET "_OLLAMA_STARTED=0"
 tasklist /FI "IMAGENAME eq ollama.exe" 2>nul | find /i "ollama.exe" >nul
 if errorlevel 1 (
     echo [>>] Starting Ollama...
     start /b "" ollama serve >nul 2>&1
+    SET "_OLLAMA_STARTED=1"
     :: Wait up to 5 s for Ollama to be ready
     for /l %%i in (1,1,10) do (
         ping -n 1 -w 500 127.0.0.1 >nul
@@ -103,13 +105,27 @@ echo.
 :: Open browser
 start "" "!LOCAL_URL!"
 
-:: Keep window open so Ctrl+C is visible
+:: Keep window open — loop until Ctrl+C or the app stops
 :loop
-timeout /t 2 >nul
+timeout /t 2 /nobreak >nul 2>&1
+if errorlevel 1 goto :cleanup
 curl -s http://127.0.0.1:%OFFLINEAI_PORT%/ >nul 2>&1
 if errorlevel 1 (
     echo [!] App stopped unexpectedly.
-    pause
-    exit /b 1
+    goto :cleanup
 )
 goto :loop
+
+:cleanup
+echo.
+echo [>>] Stopping OfflineAI...
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%OFFLINEAI_PORT% "') do (
+    taskkill /f /pid %%p >nul 2>&1
+)
+if "!_OLLAMA_STARTED!"=="1" (
+    ollama stop >nul 2>&1
+    taskkill /f /im ollama.exe >nul 2>&1
+)
+echo [OK] Stopped
+pause
+exit /b 0
