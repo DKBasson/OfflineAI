@@ -1,11 +1,11 @@
 #!/usr/bin/env zsh
 set -e
 
-SCRIPT_DIR="${0:A:h}"
+SCRIPT_DIR="${0:A:h:h}"
 cd "$SCRIPT_DIR"
 
 if [[ ! -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
-  echo "✖ Virtual environment not found. Run ./install.sh first."
+  echo "✖ Virtual environment not found. Run ./scripts/install.sh first."
   exit 1
 fi
 
@@ -97,9 +97,3 @@ if command -v open > /dev/null 2>&1; then
 elif command -v xdg-open > /dev/null 2>&1; then
   xdg-open "$LOCAL_URL" > /dev/null 2>&1 || true
 fi
-
-echo "   Press Ctrl+C to stop."
-
-# Keep the script alive so Ctrl+C cleans up
-trap "kill $APP_PID 2>/dev/null; echo 'Stopped.'" INT TERM
-wait $APP_PID
