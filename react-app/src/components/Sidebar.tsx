@@ -35,6 +35,7 @@ export function Sidebar() {
       {/* Overlay */}
       {isSidebarOpen && (
         <div
+          id="sidebar-overlay"
           className="fixed inset-0 bg-black/55 backdrop-blur-sm z-40"
           onClick={closeSidebar}
           aria-hidden="true"
@@ -43,7 +44,8 @@ export function Sidebar() {
 
       {/* Sidebar panel */}
       <aside
-        className={`fixed top-0 left-0 bottom-0 w-[292px] bg-[rgba(14,14,19,0.96)] backdrop-blur-lg border-r border-border-hi z-50 flex flex-col shadow transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        id="sidebar"
+        className={`fixed top-0 left-0 bottom-0 w-[292px] bg-[rgba(14,14,19,0.96)] backdrop-blur-lg border-r border-border-hi z-50 flex flex-col shadow transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0 open' : '-translate-x-full'}`}
         aria-label="Conversation history"
         role="navigation"
       >
@@ -51,6 +53,7 @@ export function Sidebar() {
         <div className="flex items-center justify-between px-3.5 pt-[18px] pb-3 border-b border-border shrink-0">
           <span className="text-[13px] font-semibold text-text-primary tracking-tight">History</span>
           <button
+            id="sidebar-close-btn"
             className="w-[26px] h-[26px] bg-surface-md border border-border rounded-full text-text-muted text-[13px] flex items-center justify-center cursor-pointer hover:bg-surface-hi hover:text-text-primary transition-colors"
             onClick={closeSidebar}
             aria-label="Close history"
@@ -62,6 +65,7 @@ export function Sidebar() {
         {/* Search */}
         <div className="px-2.5 pt-2.5 pb-1.5 border-b border-border shrink-0">
           <input
+            id="history-search"
             type="search"
             placeholder="Search conversations…"
             autoComplete="off"
@@ -73,7 +77,7 @@ export function Sidebar() {
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto px-2 py-1.5 scrollbar-thin">
+        <div id="history-list" className="flex-1 overflow-y-auto px-2 py-1.5 scrollbar-thin">
           {history.length === 0 ? (
             <p className="text-center text-text-dim text-[13px] py-8 px-4">
               No conversations yet
@@ -95,6 +99,7 @@ export function Sidebar() {
 
         {/* New chat button */}
         <button
+          id="new-chat-btn"
           className="m-2.5 py-2.5 bg-surface-md border border-border-hi rounded-[9px] text-accent text-[13px] font-semibold cursor-pointer text-center hover:bg-accent-lo hover:border-accent-b transition-colors shrink-0"
           onClick={() => { startNewChat(); closeSidebar(); }}
         >
@@ -118,9 +123,9 @@ function HistoryItem({
 }) {
   return (
     <div
-      className={`group flex items-center gap-1.5 px-3 py-2.5 rounded-[9px] border transition-colors mb-0.5 cursor-pointer ${isActive ? 'bg-accent-lo border-accent-b' : 'border-transparent hover:bg-surface-md hover:border-border'}`}
+      className={`history-item group flex items-center gap-1.5 px-3 py-2.5 rounded-[9px] border transition-colors mb-0.5 cursor-pointer ${isActive ? 'bg-accent-lo border-accent-b' : 'border-transparent hover:bg-surface-md hover:border-border'}`}
     >
-      <div className="flex-1 min-w-0" onClick={onSelect}>
+      <div className="history-item-main flex-1 min-w-0" onClick={onSelect}>
         <div className="text-[13px] font-medium text-text-primary truncate mb-0.5">
           {item.title}
         </div>
@@ -130,7 +135,7 @@ function HistoryItem({
         </div>
       </div>
       <button
-        className="shrink-0 opacity-0 group-hover:opacity-100 w-[22px] h-[22px] rounded-full bg-transparent border border-transparent text-text-dim text-[11px] flex items-center justify-center cursor-pointer hover:bg-surface-hi hover:border-border-hi hover:text-text-primary transition-all"
+        className="history-del-btn shrink-0 opacity-0 group-hover:opacity-100 w-[22px] h-[22px] rounded-full bg-transparent border border-transparent text-text-dim text-[11px] flex items-center justify-center cursor-pointer hover:bg-surface-hi hover:border-border-hi hover:text-text-primary transition-all"
         title="Delete conversation"
         aria-label="Delete conversation"
         onClick={(e) => { e.stopPropagation(); onDelete(); }}

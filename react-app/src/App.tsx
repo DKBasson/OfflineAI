@@ -16,10 +16,11 @@ function AppInner() {
     setDragActive,
     startNewChat,
     openSidebar,
+    closeSidebar,
+    isSidebarOpen,
     exportConversation,
     setShortcutsOpen,
     closeLightbox,
-    closeSidebar,
     closeSettings,
     isNameModalOpen,
     setNameModalOpen,
@@ -44,7 +45,7 @@ function AppInner() {
       }
       if (!inInput && e.key === '?') { e.preventDefault(); setShortcutsOpen(true); }
       if (mod && e.key === 'k') { e.preventDefault(); startNewChat(); }
-      if (mod && e.key === 'l') { e.preventDefault(); openSidebar(); }
+      if (mod && e.key === 'l') { e.preventDefault(); isSidebarOpen ? closeSidebar() : openSidebar(); }
       if (mod && e.key === 'e') { e.preventDefault(); if (messages.length) exportConversation(); }
       if (mod && e.key === '/') { e.preventDefault(); document.getElementById('input')?.focus(); }
       if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
@@ -65,6 +66,7 @@ function AppInner() {
     activeUsername,
     startNewChat,
     openSidebar,
+    isSidebarOpen,
     exportConversation,
     messages.length,
   ]);

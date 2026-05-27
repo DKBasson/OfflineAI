@@ -52,7 +52,7 @@ function UserBubble({
   const initial = username ? username[0].toUpperCase() : 'U';
 
   return (
-    <div className="flex gap-3 mb-4 max-w-3xl self-end ml-auto flex-row-reverse" data-role="user">
+    <div className="message user flex gap-3 mb-4 max-w-3xl self-end ml-auto flex-row-reverse" data-role="user">
       <div className="avatar">{initial}</div>
       <div className="message-body flex-1 min-w-0">
         {message.images && message.images.length > 0 && (
@@ -104,7 +104,7 @@ function AssistantBubble({
   }, [rendered]);
 
   return (
-    <div className="flex gap-3 mb-4 max-w-3xl" data-role="assistant">
+    <div className="message assistant flex gap-3 mb-4 max-w-3xl" data-role="assistant">
       <div className="avatar">⚡</div>
       <div className="message-body flex-1 min-w-0" ref={bodyRef}>
         {message.generatedImage ? (

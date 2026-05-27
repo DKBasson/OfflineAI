@@ -41,6 +41,7 @@ export function Header() {
       {/* New chat */}
       <button
         className="hdr-icon-btn"
+        id="clear-btn"
         title="New chat (⌘K)"
         onClick={startNewChat}
         aria-label="New chat"
@@ -52,8 +53,12 @@ export function Header() {
         </svg>
       </button>
 
+      {/* Brand */}
+      <span className="brand text-[13px] font-semibold text-text-primary tracking-tight select-none">OfflineAI</span>
+
       {/* Model selector */}
       <select
+        id="chat-model-select"
         className="flex-1 min-w-0 bg-transparent border border-transparent rounded-sm text-text-primary text-xs font-medium px-2 py-1.5 outline-none cursor-pointer hover:border-border hover:bg-surface-md transition-colors truncate max-w-[220px]"
         value={activeModel}
         onChange={(e) => {
@@ -75,41 +80,41 @@ export function Header() {
       {/* Connection pill */}
       <ConnectionPill state={connectionState} label={connectionLabel} title={connectionTitle} />
 
-      {/* Token counter */}
-      {total > 0 && (
-        <div
-          className="flex items-center gap-1 px-2 py-1 rounded-full bg-transparent border border-border text-text-dim text-[11px] font-semibold tracking-wide cursor-default shrink-0"
-          title={`Tokens used\nInput: ${tokenStats.input.toLocaleString()}\nOutput: ${tokenStats.output.toLocaleString()}\nTotal: ${total.toLocaleString()}`}
-          aria-label={`${fmtTokens(total)} tokens used`}
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-60 shrink-0">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="16" />
-            <line x1="8" y1="12" x2="16" y2="12" />
-          </svg>
-          {fmtTokens(total)}
-        </div>
-      )}
+      {/* Token counter — always rendered so #token-counter and #token-count are always in DOM */}
+      <div
+        id="token-counter"
+        className={`flex items-center gap-1 px-2 py-1 rounded-full bg-transparent border border-border text-text-dim text-[11px] font-semibold tracking-wide cursor-default shrink-0 ${total === 0 ? 'opacity-0 pointer-events-none' : ''}`}
+        title={`Tokens used\nInput: ${tokenStats.input.toLocaleString()}\nOutput: ${tokenStats.output.toLocaleString()}\nTotal: ${total.toLocaleString()}`}
+        aria-label={`${fmtTokens(total)} tokens used`}
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-60 shrink-0">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="16" />
+          <line x1="8" y1="12" x2="16" y2="12" />
+        </svg>
+        <span id="token-count">{fmtTokens(total)}</span>
+      </div>
 
-      {/* Export */}
-      {messages.length > 0 && (
-        <button
-          className="hdr-icon-btn"
-          title="Export conversation (⌘E)"
-          onClick={exportConversation}
-          aria-label="Export conversation"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-        </button>
-      )}
+      {/* Export — always in DOM, hidden when no messages */}
+      <button
+        id="export-btn"
+        className={`hdr-icon-btn ${messages.length === 0 ? 'opacity-0 pointer-events-none' : ''}`}
+        title="Export conversation (⌘E)"
+        onClick={exportConversation}
+        aria-label="Export conversation"
+        tabIndex={messages.length === 0 ? -1 : 0}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+      </button>
 
       {/* Shortcuts */}
       <button
         className="hdr-icon-btn"
+        id="shortcuts-btn"
         title="Keyboard shortcuts (?)"
         onClick={() => setShortcutsOpen(true)}
         aria-label="Keyboard shortcuts"
@@ -122,7 +127,7 @@ export function Header() {
 
       {/* Settings */}
       <button
-        className="hdr-icon-btn ml-auto"
+        className="hdr-icon-btn"
         id="settings-btn"
         title="Settings"
         onClick={openSettings}
@@ -162,7 +167,8 @@ function ConnectionPill({
 
   return (
     <div
-      className={`relative flex items-center gap-1.5 px-2 py-1 rounded-full border text-[11px] font-semibold whitespace-nowrap cursor-default shrink-0 ${textClass} ${state === 'checking' ? 'conn-checking' : ''}`}
+      id="connection-pill"
+      className={`relative flex items-center gap-1.5 px-2 py-1 rounded-full border text-[11px] font-semibold whitespace-nowrap cursor-default shrink-0 ${state} ${textClass} ${state === 'checking' ? 'conn-checking' : ''}`}
       style={{ background: 'var(--glass-sm)', borderColor: 'var(--border)' }}
       title={title}
       aria-label={title}
@@ -170,6 +176,8 @@ function ConnectionPill({
     >
       <span className={`w-[6px] h-[6px] rounded-full ${dotClass} ${state === 'checking' ? 'animate-pulse' : ''}`} />
       {label}
+      {/* Hidden tooltip anchor for tests */}
+      <span id="connection-tooltip" className="sr-only">{title}</span>
     </div>
   );
 }

@@ -66,8 +66,6 @@ export function ChatArea() {
                   </div>
                 ) : streamingContent ? (
                   <StreamingMessage content={streamingContent} />
-                ) : streamingError ? (
-                  <p className="text-err-text text-[14px]">{streamingError}</p>
                 ) : (
                   /* Thinking dots */
                   <div className="thinking" aria-label="AI is thinking">
@@ -76,9 +74,16 @@ export function ChatArea() {
                     <span />
                   </div>
                 )}
-                {streamingError && (
-                  <p className="text-err-text text-[14px] mt-1">{streamingError}</p>
-                )}
+              </div>
+            </div>
+          )}
+
+          {/* Persistent error bubble after failed streaming */}
+          {!isStreaming && streamingError && (
+            <div className="message assistant flex gap-3 mb-4 max-w-3xl">
+              <div className="avatar">⚡</div>
+              <div className="message-body flex-1 min-w-0">
+                <div className="msg-text error">{streamingError}</div>
               </div>
             </div>
           )}
