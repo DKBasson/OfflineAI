@@ -16,7 +16,15 @@
     maxTokens: 0,
     numCtx: 0,
     historyLimit: 60,
-    autoTitle: true
+    autoTitle: true,
+    imageModel: 'x/z-image-turbo',
+    imagePerfProfile: 'eco'
+  };
+
+  const IMAGE_PERF_PRESETS = {
+    eco: { width: 640, height: 640, steps: 6 },
+    balanced: { width: 768, height: 768, steps: 10 },
+    quality: { width: 1024, height: 1024, steps: 16 }
   };
 
   const urlToken = new URLSearchParams(location.search).get('token');
@@ -68,8 +76,17 @@
       maxTokens: clampInt(s.maxTokens, 0, 8192, DEFAULT_SETTINGS.maxTokens),
       numCtx: clampInt(s.numCtx, 0, 32768, DEFAULT_SETTINGS.numCtx),
       historyLimit: clampInt(s.historyLimit, 10, 200, DEFAULT_SETTINGS.historyLimit),
-      autoTitle: s.autoTitle !== false
+      autoTitle: s.autoTitle !== false,
+      imageModel: String(s.imageModel || 'x/z-image-turbo'),
+      imagePerfProfile: Object.prototype.hasOwnProperty.call(IMAGE_PERF_PRESETS, s.imagePerfProfile)
+        ? s.imagePerfProfile
+        : DEFAULT_SETTINGS.imagePerfProfile
     };
+  }
+
+  function getImagePerfConfig() {
+    const key = getSettings().imagePerfProfile;
+    return IMAGE_PERF_PRESETS[key] || IMAGE_PERF_PRESETS.eco;
   }
 
   function getSettings() {
@@ -198,6 +215,11 @@
   const shortcutsBtn    = document.getElementById('shortcuts-btn');
   const shortcutsModal  = document.getElementById('shortcuts-modal');
   const shortcutsClose  = document.getElementById('shortcuts-close-btn');
+  const settingsImageModel    = document.getElementById('settings-image-model');
+  const pullImageModelBtn      = document.getElementById('pull-image-model-btn');
+  const pullImageModelStatus   = document.getElementById('pull-image-model-status');
+  const imageModelSelect       = document.getElementById('image-model-select');
+  const settingsImagePerf      = document.getElementById('settings-image-perf');
 
   // Detect modifier key for display
   const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
@@ -397,6 +419,20 @@
     setChatModelOptions(models, selected);
   }
 
+  // Returns true if two model names refer to the same model, ignoring :latest tag
+  function modelNamesMatch(a, b) {
+    if (!a || !b) return false;
+    const norm = n => n.toLowerCase().replace(/:latest$/, '');
+    return norm(a) === norm(b);
+  }
+
+  function isLikelyImageModelName(name) {
+    if (!name) return false;
+    const n = String(name).toLowerCase().replace(/:latest$/, '');
+    return /^x\/(?:z-image-turbo|flux2-klein)$/.test(n)
+      || /(?:^|\/|\b)(?:image|flux|sdxl|stable[-_ ]?diffusion|diffusion)(?:$|\b)/i.test(n);
+  }
+
   async function refreshDownloadedModelsList() {
     if (!downloadedModelsList) return;
     downloadedModelsList.innerHTML = '<div class="downloaded-models-empty">Checking models…</div>';
@@ -407,14 +443,42 @@
       const data = await r.json();
       if (!r.ok || data.offline) {
         downloadedModelsList.innerHTML = `<div class="downloaded-models-empty">${escHtml(data.error || 'Ollama is not reachable')}</div>`;
+        if (imageModelSelect) imageModelSelect.innerHTML = '<option value="">— no image model selected —</option>';
         return;
       }
       const models = (data.models || []).map(m => m.name).filter(Boolean);
-      if (!models.length) {
+
+      // Resolve configured image model to exact Ollama name (handles :latest tag differences)
+      const currentImageModel = getSettings().imageModel;
+      const resolvedImageModel = models.find(m => modelNamesMatch(m, currentImageModel)) || '';
+
+      // Auto-normalize: persist exact Ollama model name so future lookups are exact-match
+      if (resolvedImageModel && resolvedImageModel !== currentImageModel) {
+        persistSettings({ ...getSettings(), imageModel: resolvedImageModel });
+      }
+
+      // Populate image model selector with all downloaded models
+      if (imageModelSelect) {
+        imageModelSelect.innerHTML = '<option value="">— no image model selected —</option>' +
+          models.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+        imageModelSelect.value = resolvedImageModel;
+      }
+
+      // Show only non-image-model chat models in the downloaded list
+      const effectiveImageModel = resolvedImageModel || currentImageModel;
+      const chatModels = effectiveImageModel
+        ? models.filter(m => !modelNamesMatch(m, effectiveImageModel))
+        : models;
+
+      if (!chatModels.length && !models.length) {
         downloadedModelsList.innerHTML = '<div class="downloaded-models-empty">No downloaded models found</div>';
         return;
       }
-      downloadedModelsList.innerHTML = models
+      if (!chatModels.length) {
+        downloadedModelsList.innerHTML = '<div class="downloaded-models-empty">No chat models (only image model downloaded)</div>';
+        return;
+      }
+      downloadedModelsList.innerHTML = chatModels
         .map(name => `<span class="downloaded-model-pill">${escHtml(name)}</span>`)
         .join('');
     } catch (e) {
@@ -512,6 +576,8 @@
     settingsNumCtx.value = s.numCtx;
     settingsHistoryLimit.value = s.historyLimit;
     settingsAutoTitle.checked = s.autoTitle;
+    if (settingsImagePerf) settingsImagePerf.value = s.imagePerfProfile;
+    // imageModelSelect is populated by refreshDownloadedModelsList (called below)
     renderSpSavedList();
     renderSpSelect();
     updateModelHealth();
@@ -535,7 +601,9 @@
       maxTokens: settingsMaxTokens.value,
       numCtx: settingsNumCtx.value,
       historyLimit: settingsHistoryLimit.value,
-      autoTitle: settingsAutoTitle.checked
+      autoTitle: settingsAutoTitle.checked,
+      imageModel: (imageModelSelect?.value) || getSettings().imageModel,
+      imagePerfProfile: settingsImagePerf?.value || getSettings().imagePerfProfile
     });
     const nameChanged = name !== activeUsername;
     persistSettings(nextSettings);
@@ -709,12 +777,10 @@
   }
 
   // ── Model pull ────────────────────────────────────────
-  async function pullModel(modelName) {
-    const name = modelName.trim();
-    if (!name) { pullInput.focus(); return; }
-    pullBtn.disabled = true;
-    pullStatus.classList.remove('hidden', 'success', 'error');
-    pullStatus.textContent = 'Connecting…';
+  async function _doPull(name, btnEl, statusEl) {
+    btnEl.disabled = true;
+    statusEl.classList.remove('hidden', 'success', 'error');
+    statusEl.textContent = 'Connecting…';
     try {
       const resp = await fetch('/api/pull', {
         method: 'POST',
@@ -734,31 +800,58 @@
           try {
             const d = JSON.parse(line);
             if (d.error) {
-              pullStatus.textContent = `Error: ${d.error}`;
-              pullStatus.classList.add('error'); return;
+              statusEl.textContent = `Error: ${d.error}`;
+              statusEl.classList.add('error');
+              return false;
             }
             if (d.status) {
-              if (d.total && d.completed) {
-                const pct = Math.round((d.completed / d.total) * 100);
-                pullStatus.textContent = `${d.status} — ${pct}%`;
-              } else {
-                pullStatus.textContent = d.status;
-              }
+              statusEl.textContent = (d.total && d.completed)
+                ? `${d.status} — ${Math.round((d.completed / d.total) * 100)}%`
+                : d.status;
             }
           } catch { /* malformed */ }
         }
       }
-      pullStatus.textContent = `✓ ${name} ready`;
-      pullStatus.classList.add('success');
+      statusEl.textContent = `✓ ${name} ready`;
+      statusEl.classList.add('success');
+      return true;
+    } catch (e) {
+      statusEl.textContent = `Error: ${e.message}`;
+      statusEl.classList.add('error');
+      return false;
+    } finally {
+      btnEl.disabled = false;
+    }
+  }
+
+  async function pullModel(modelName) {
+    const name = modelName.trim();
+    if (!name) { pullInput.focus(); return; }
+    const ok = await _doPull(name, pullBtn, pullStatus);
+    if (ok) {
       pullInput.value = '';
       refreshConnectionStatus();
       await refreshChatModelSelect(activeModel);
       await refreshDownloadedModelsList();
-    } catch (e) {
-      pullStatus.textContent = `Error: ${e.message}`;
-      pullStatus.classList.add('error');
-    } finally {
-      pullBtn.disabled = false;
+    }
+  }
+
+  async function pullImageModel() {
+    const name = (settingsImageModel?.value || '').trim();
+    if (!name) { settingsImageModel?.focus(); return; }
+    const ok = await _doPull(name, pullImageModelBtn, pullImageModelStatus);
+    if (ok) {
+      if (settingsImageModel) settingsImageModel.value = '';
+      refreshConnectionStatus();
+      await refreshDownloadedModelsList();
+      // Auto-select the newly pulled model (Ollama may have added :latest)
+      if (imageModelSelect) {
+        const match = [...imageModelSelect.options].find(o => modelNamesMatch(o.value, name));
+        if (match) {
+          imageModelSelect.value = match.value;
+          persistSettings({ ...getSettings(), imageModel: match.value });
+        }
+      }
     }
   }
 
@@ -887,6 +980,8 @@
     shortcutsModal.addEventListener('click', e => { if (e.target === shortcutsModal) closeShortcuts(); });
     pullBtn.addEventListener('click', () => pullModel(pullInput.value));
     pullInput.addEventListener('keydown', e => { if (e.key === 'Enter') pullModel(pullInput.value); });
+    if (pullImageModelBtn) pullImageModelBtn.addEventListener('click', pullImageModel);
+    if (settingsImageModel) settingsImageModel.addEventListener('keydown', e => { if (e.key === 'Enter') pullImageModel(); });
 
     inputEl.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -1032,7 +1127,7 @@
     const id = currentConvId || String(Date.now());
     currentConvId = id;
     // Strip base64 images to avoid localStorage bloat
-    const stripped = messages.map(({ images, ...rest }) => rest);
+    const stripped = messages.map(({ images, generatedImage, ...rest }) => rest);
     const existing = history.find(h => h.id === id);
     const title = existing?.title || stripped[0]?.content?.trim().slice(0, 72) || 'Image conversation';
     const entry = { id, title, timestamp: Date.now(), model: activeModel, messages: stripped, systemPrompt: currentSystemPrompt, systemPromptId: currentSystemPromptId };
@@ -1411,11 +1506,376 @@
     }
   }
 
+  // ── Image generation ──────────────────────────────────
+  function isImageRequest(text) {
+    const t = text.trim();
+    // Explicit slash commands
+    if (/^\/(?:image|img|draw|paint)\s+/i.test(t)) return true;
+    // Action verb + image noun (extended)
+    if (/\b(?:generate|create|make|draw|paint|render|illustrate|design|visualize|visualise|depict|photograph|sketch|produce)\b.{0,80}\b(?:image|picture|photo|illustration|painting|drawing|artwork|portrait|wallpaper|scene|landscape|sketch|logo|banner|graphic|thumbnail|avatar|icon|meme|anime|cartoon|animation|photograph)\b/i.test(t)) return true;
+    // "a/an image/photo/picture of"
+    if (/\b(?:an?\s+)?(?:image|photo|picture|illustration|painting|drawing|artwork)\s+of\b/i.test(t)) return true;
+    // "draw/paint/illustrate/render/design (me) a/an ..."
+    if (/\b(?:draw|paint|illustrate|render|design|sketch)\s+(?:me\s+)?(?:a\s+|an\s+)/i.test(t)) return true;
+    // "generate (me) a/an image/picture/photo"
+    if (/\bgenerate\s+(?:me\s+)?(?:a\s+|an\s+)?(?:image|picture|photo)\b/i.test(t)) return true;
+    // "show me a/an picture/image/photo of"
+    if (/\bshow\s+me\s+(?:a\s+|an\s+)?(?:picture|image|photo|illustration)\b/i.test(t)) return true;
+    // "can you draw/paint/create/make/generate/design ..."
+    if (/\bcan\s+you\s+(?:draw|paint|create|make|generate|illustrate|render|design|sketch)\b/i.test(t)) return true;
+    // "I want (to see) a picture/image"
+    if (/\bI\s+want\s+(?:to\s+see\s+)?(?:a\s+|an\s+)?(?:picture|image|photo|illustration|drawing|painting)\b/i.test(t)) return true;
+    // "create/make/generate a visual"
+    if (/\b(?:create|make|generate)\s+(?:a\s+|an\s+)?visual\b/i.test(t)) return true;
+    return false;
+  }
+
+  function parseFirstNdjsonObject(raw) {
+    const firstLine = String(raw || '').trim().split('\n').find(Boolean) || '{}';
+    try { return JSON.parse(firstLine); }
+    catch { return {}; }
+  }
+
+  function extractImagePayload(payload) {
+    const raw = payload?.image
+      || (Array.isArray(payload?.images) ? payload.images[0] : null)
+      || (typeof payload?.images === 'string' ? payload.images : null)
+      || (typeof payload?.response === 'string' && /^[A-Za-z0-9+/=\s]+$/.test(payload.response) ? payload.response : null);
+    if (!raw || typeof raw !== 'string') return null;
+    return raw.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').replace(/\s+/g, '');
+  }
+
+  function buildImageRefinementContext(currentText) {
+    const contextMsgs = messages
+      .slice(-activeContextSize)
+      .map(m => ({ role: m.role, content: String(m.content || '').trim() }))
+      .filter(m => m.content);
+
+    // Avoid duplicating the current request if it was already appended to messages.
+    if (!contextMsgs.length || contextMsgs[contextMsgs.length - 1].content !== currentText.trim()) {
+      contextMsgs.push({ role: 'user', content: currentText.trim() });
+    }
+
+    // Keep context compact to prevent prompt bloat during refinement.
+    const compact = contextMsgs
+      .map(m => `${m.role.toUpperCase()}: ${m.content.replace(/\s+/g, ' ')}`)
+      .join('\n')
+      .slice(-6000);
+
+    return compact;
+  }
+
+  async function refineImagePrompt(text, signal) {
+    const contextSummary = buildImageRefinementContext(text);
+    console.log(`[Image] Enhancing prompt via text model: "${activeModel}" — ${contextSummary.split('\n').length} context lines`);
+
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        model: activeModel,
+        messages: [
+          { role: 'system', content: 'You are an expert image prompt engineer. Use the recent conversation context to infer references, subjects, style, and constraints. Convert the latest user image request into one detailed, vivid image-generation prompt. Reply with ONLY the final prompt text: no explanations, no bullets, no quotes, no preamble. Keep it under 200 words.' },
+          {
+            role: 'user',
+            content: `Recent conversation context (latest ${activeContextSize} messages):\n${contextSummary}\n\nLatest image request:\n${text}`
+          }
+        ],
+        stream: true,
+        options: { temperature: 0.7, top_p: 0.9, num_predict: 200 },
+        ...(activeUsername ? { user: activeUsername } : {})
+      }),
+      signal
+    });
+
+    if (!resp.ok) throw new Error(`Text model "${activeModel}" returned HTTP ${resp.status}`);
+
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let content = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let chunk;
+        try { chunk = JSON.parse(line); } catch { continue; }
+        if (chunk.error) throw new Error(`Text model error during prompt enhancement: ${chunk.error}`);
+        if (chunk.message?.content) content += chunk.message.content;
+      }
+    }
+    if (buf.trim()) {
+      try {
+        const chunk = JSON.parse(buf.trim());
+        if (chunk.message?.content) content += chunk.message.content;
+      } catch {}
+    }
+
+    const refined = content.trim();
+    if (!refined) throw new Error(`Text model "${activeModel}" returned empty content for prompt enhancement`);
+
+    console.log(`[Image] Enhanced prompt: "${refined.slice(0, 150)}${refined.length > 150 ? '\u2026' : ''}"`);
+    fetchAndRenderTokens();
+    return refined;
+  }
+
+  async function resolveImageGenerationModel(preferredModel, signal) {
+    if (!preferredModel || isLikelyImageModelName(preferredModel)) return preferredModel;
+    try {
+      const mr = await fetch('/api/models', { headers: authHeaders(), signal });
+      const md = await mr.json();
+      if (!mr.ok || md.offline) return preferredModel;
+      const modelNames = (md.models || []).map(m => m.name).filter(Boolean);
+      const fallbackImageModel = modelNames.find(isLikelyImageModelName);
+      if (!fallbackImageModel) return preferredModel;
+
+      persistSettings({ ...getSettings(), imageModel: fallbackImageModel });
+      if (imageModelSelect && [...imageModelSelect.options].some(o => o.value === fallbackImageModel)) {
+        imageModelSelect.value = fallbackImageModel;
+      }
+      return fallbackImageModel;
+    } catch {
+      return preferredModel;
+    }
+  }
+
+  function createImageProgressUI(assistantRow, generationModel) {
+    assistantRow.querySelector('.thinking')?.remove();
+    const msgBody = assistantRow.querySelector('.message-body');
+
+    const progressWrap = document.createElement('div');
+    progressWrap.className = 'image-gen-progress';
+    const labelEl = document.createElement('span');
+    labelEl.className = 'image-gen-label';
+    labelEl.textContent = `Generating image with ${generationModel}…`;
+    const barWrap = document.createElement('div');
+    barWrap.className = 'image-gen-bar-wrap';
+    const barEl = document.createElement('div');
+    barEl.className = 'image-gen-bar';
+    barWrap.appendChild(barEl);
+    progressWrap.appendChild(labelEl);
+    progressWrap.appendChild(barWrap);
+    msgBody.appendChild(progressWrap);
+    scrollBottom();
+
+    return { progressWrap, labelEl, barEl, msgBody };
+  }
+
+  async function generateImageBase64({ model, prompt, signal, onProgress, onStatus }) {
+    let generatedB64 = null;
+    let textOnlyOutput = '';
+    let lastPayloadKeys = '';
+
+    const applyPayload = (payload) => {
+      if (!payload || typeof payload !== 'object') return;
+      if (payload.error) throw new Error(payload.error);
+      lastPayloadKeys = Object.keys(payload).join(', ');
+
+      const imagePayload = extractImagePayload(payload);
+      if (typeof payload.response === 'string' && !imagePayload && payload.response) {
+        textOnlyOutput += payload.response;
+      }
+      if (payload.total && payload.completed != null) {
+        const pct = Math.min(99, Math.round((payload.completed / payload.total) * 100));
+        onProgress?.(pct);
+      }
+      if (imagePayload) {
+        generatedB64 = imagePayload;
+        onProgress?.(100);
+      }
+    };
+
+    const perf = getImagePerfConfig();
+    const buildImageRequestBody = (stream) => ({
+      model,
+      prompt,
+      stream,
+      width: perf.width,
+      height: perf.height,
+      steps: perf.steps
+    });
+
+    const streamResp = await fetch('/api/generate-image', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(buildImageRequestBody(true)),
+      signal
+    });
+    if (!streamResp.ok) {
+      const errText = await streamResp.text().catch(() => streamResp.statusText);
+      throw new Error(`Image generation failed (${streamResp.status}): ${parseErrorText(streamResp.status, errText)}`);
+    }
+
+    const reader = streamResp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let parsed;
+        try { parsed = JSON.parse(line); }
+        catch { continue; }
+        applyPayload(parsed);
+      }
+    }
+
+    if (buf.trim()) applyPayload(parseFirstNdjsonObject(buf));
+
+    if (!generatedB64) {
+      onStatus?.('Finalizing image…');
+      const singleResp = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(buildImageRequestBody(false)),
+        signal
+      });
+      if (singleResp.ok) {
+        applyPayload(parseFirstNdjsonObject(await singleResp.text()));
+      }
+    }
+
+    return { generatedB64, textOnlyOutput, lastPayloadKeys };
+  }
+
+  async function handleImageRequest(text) {
+    isStreaming = true;
+    sendBtn.style.display = 'none';
+    stopBtn.style.display = 'flex';
+    abortCtrl = new AbortController();
+    const assistantRow = appendThinking();
+
+    try {
+      console.log(`[Image] Request received: "${text}"`);
+      let refinedPrompt = text;
+      try {
+        refinedPrompt = await refineImagePrompt(text, abortCtrl.signal);
+        console.log(`[Image] Prompt refined: "${text}" → "${refinedPrompt}"`);
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        console.error('[Image] Prompt enhancement FAILED:', e.message);
+        // Show a visible warning but still proceed with the original prompt
+        assistantRow.querySelector('.thinking')?.replaceWith((() => {
+          const w = document.createElement('div');
+          w.className = 'msg-text';
+          w.style.cssText = 'color:var(--warn,#e5a000);font-size:12px;margin-bottom:4px';
+          w.textContent = `⚠️ Prompt enhancement failed (${e.message}). Using original prompt.`;
+          return w;
+        })());
+      }
+
+      const imageModel = getSettings().imageModel;
+      if (!imageModel) throw new Error('No image model configured. Go to Settings → Image generation model and select or pull one (e.g. x/z-image-turbo).');
+      const generationModel = await resolveImageGenerationModel(imageModel, abortCtrl.signal);
+      console.log(`[Image] Starting generation — model: ${generationModel}, prompt: "${refinedPrompt}"`);
+      const { progressWrap, labelEl, barEl, msgBody } = createImageProgressUI(assistantRow, generationModel);
+
+      const { generatedB64, textOnlyOutput, lastPayloadKeys } = await generateImageBase64({
+        model: generationModel,
+        prompt: refinedPrompt,
+        signal: abortCtrl.signal,
+        onProgress: (pct) => {
+          barEl.style.width = `${pct}%`;
+          labelEl.textContent = pct >= 100 ? 'Done!' : `Generating image… ${pct}%`;
+        },
+        onStatus: (textStatus) => {
+          labelEl.textContent = textStatus;
+        }
+      });
+
+      if (!generatedB64) {
+        const textOut = textOnlyOutput.trim();
+        if (textOut) {
+          console.warn(`[Image] Model '${generationModel}' returned text instead of an image. Response: "${textOut.slice(0, 200)}"`);
+          throw new Error(`Model '${generationModel}' returned text instead of image. Select an image model in Settings (e.g. x/z-image-turbo:latest).`);
+        }
+        console.warn(`[Image] No image returned. Last payload keys: ${lastPayloadKeys || '(none)'}`);
+        const details = lastPayloadKeys ? ` Last payload keys: ${lastPayloadKeys}.` : '';
+        throw new Error(`No image was returned. Make sure the image model is pulled and supports image generation.${details}`);
+      }
+
+      console.log(`[Image] Image received (base64 length: ${generatedB64.length} chars). Rendering…`);
+      // Step 4: Replace progress indicator with the generated image
+      progressWrap.remove();
+      const imgWrap = document.createElement('div');
+      imgWrap.className = 'msg-generated-image';
+      const img = document.createElement('img');
+      img.className = 'generated-image';
+      img.alt = refinedPrompt;
+      img.src = `data:image/png;base64,${generatedB64}`;
+      img.addEventListener('click', () => { lightboxImg.src = img.src; lightbox.classList.add('open'); });
+      imgWrap.appendChild(img);
+      msgBody.appendChild(imgWrap);
+      const captionEl = document.createElement('div');
+      captionEl.className = 'msg-text image-gen-caption';
+      captionEl.textContent = `Prompt: ${refinedPrompt}`;
+      msgBody.appendChild(captionEl);
+
+      const assistantMsg = {
+        role: 'assistant',
+        content: `Prompt: ${refinedPrompt}`,
+        generatedImage: generatedB64,
+        imagePrompt: refinedPrompt,
+        imageModel: generationModel
+      };
+      messages.push(assistantMsg);
+      assistantRow.dataset.msgIndex = String(messages.length - 1);
+      addMessageActions(assistantRow, assistantMsg);
+      saveToHistory();
+
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        assistantRow.remove();
+        if (messages.length && messages[messages.length - 1]?.role === 'user') {
+          messages.pop();
+        }
+      } else {
+        assistantRow.querySelector('.thinking')?.remove();
+        assistantRow.querySelector('.image-gen-progress')?.remove();
+        const errEl = document.createElement('div');
+        errEl.className = 'msg-text error';
+        errEl.textContent = `⚠️ ${err.message}`;
+        assistantRow.querySelector('.message-body').appendChild(errEl);
+        if (messages.length && messages[messages.length - 1]?.role === 'user') {
+          saveToHistory();
+        }
+      }
+    } finally {
+      isStreaming = false;
+      sendBtn.style.display = 'flex';
+      stopBtn.style.display = 'none';
+      abortCtrl = null;
+      scrollBottom();
+      inputEl.focus();
+    }
+  }
+
   // ── Send ──────────────────────────────────────────────
   async function sendMessage() {
     if (isStreaming) return;
     const text = inputEl.value.trim();
     if (!text && !pendingImages.length && !pendingFiles.length && !pendingAudio.length) return;
+
+    // Intercept image generation requests (text-only, no file attachments)
+    if (text && !pendingImages.length && !pendingFiles.length && !pendingAudio.length && isImageRequest(text)) {
+      const userMsg = { role: 'user', content: text };
+      messages.push(userMsg);
+      inputEl.value = '';
+      autoResize(inputEl);
+      appendUserBubble(userMsg, [], messages.length - 1);
+      await handleImageRequest(text);
+      return;
+    }
 
     // Prepend attached text files as code blocks in the message content
     let fullContent = text;
@@ -1499,13 +1959,35 @@
     const el = document.createElement('div');
     el.className = 'message assistant';
     if (msgIndex >= 0) el.dataset.msgIndex = String(msgIndex);
-    el.innerHTML = `
-      <div class="avatar">⚡</div>
-      <div class="message-body">
-        <div class="msg-text">${DOMPurify.sanitize(renderMd(msg.content))}</div>
-      </div>`;
-    el.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
-    el.querySelectorAll('pre').forEach(addCopyBtn);
+
+    if (msg.generatedImage) {
+      el.innerHTML = '<div class="avatar">⚡</div><div class="message-body"></div>';
+      const body = el.querySelector('.message-body');
+      const imgWrap = document.createElement('div');
+      imgWrap.className = 'msg-generated-image';
+      const img = document.createElement('img');
+      img.className = 'generated-image';
+      img.alt = msg.imagePrompt || 'Generated image';
+      img.src = `data:image/png;base64,${msg.generatedImage}`;
+      img.addEventListener('click', () => { lightboxImg.src = img.src; lightbox.classList.add('open'); });
+      imgWrap.appendChild(img);
+      body.appendChild(imgWrap);
+      if (msg.content) {
+        const caption = document.createElement('div');
+        caption.className = 'msg-text image-gen-caption';
+        caption.textContent = msg.content;
+        body.appendChild(caption);
+      }
+    } else {
+      el.innerHTML = `
+        <div class="avatar">⚡</div>
+        <div class="message-body">
+          <div class="msg-text">${DOMPurify.sanitize(renderMd(msg.content))}</div>
+        </div>`;
+      el.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+      el.querySelectorAll('pre').forEach(addCopyBtn);
+    }
+
     addMessageActions(el, msg);
     messagesEl.appendChild(el);
     scrollBottom();

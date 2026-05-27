@@ -7,6 +7,7 @@ set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 cd /d "%SCRIPT_DIR%"
 
 set "MODEL=gemma4:e4b"
+set "IMAGE_MODEL=x/z-image-turbo"
 
 echo ==========================================
 echo   OfflineAI — Installer (Windows)
@@ -90,11 +91,29 @@ if not errorlevel 1 (
     echo [OK] Model '%MODEL%' ready
 )
 
+:: -- 5. Pull the image generation model ----------------------------------
+echo.
+echo [>>] Checking for image generation model: %IMAGE_MODEL%
+echo     (~5 GB download -- press Ctrl+C to skip, then run: ollama pull %IMAGE_MODEL%)
+
+ollama list 2>nul | findstr /i "%IMAGE_MODEL%" >nul
+if not errorlevel 1 (
+    echo [OK] Model '%IMAGE_MODEL%' already downloaded
+) else (
+    echo     Downloading '%IMAGE_MODEL%' -- this may take several minutes...
+    ollama pull "%IMAGE_MODEL%"
+    if errorlevel 1 (
+        echo [!] Skipped -- run 'ollama pull %IMAGE_MODEL%' later to enable image generation
+    ) else (
+        echo [OK] Model '%IMAGE_MODEL%' ready
+    )
+)
+
 if "%OLLAMA_WAS_STARTED%"=="1" (
     taskkill /f /im ollama.exe >nul 2>&1
 )
 
-:: ── 5. Vendor front-end assets (offline use) ─────────────────────
+:: ── 6. Vendor front-end assets (offline use) ─────────────────────
 set "STATIC_DIR=%SCRIPT_DIR%\static"
 if not exist "%STATIC_DIR%" mkdir "%STATIC_DIR%"
 
@@ -115,6 +134,7 @@ echo   Run the app with:  start.bat
 echo.
 echo   Features enabled:
 echo     * Chat with local AI models via Ollama
+echo     * Image generation (ask to draw/generate an image)
 echo     * Image attachments (vision models)
 echo     * Audio transcription (.mp3 .wav .opus .m4a ...)
 echo     * Document reading (.docx .odt .ods .odp)

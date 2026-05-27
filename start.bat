@@ -8,6 +8,12 @@ cd /d "%SCRIPT_DIR%"
 
 if not defined OFFLINEAI_HOST set "OFFLINEAI_HOST=127.0.0.1"
 if not defined OFFLINEAI_PORT set "OFFLINEAI_PORT=8080"
+if not defined OFFLINEAI_IMAGE_MAX_WIDTH set "OFFLINEAI_IMAGE_MAX_WIDTH=1024"
+if not defined OFFLINEAI_IMAGE_MAX_HEIGHT set "OFFLINEAI_IMAGE_MAX_HEIGHT=1024"
+if not defined OFFLINEAI_IMAGE_MAX_STEPS set "OFFLINEAI_IMAGE_MAX_STEPS=16"
+if not defined OFFLINEAI_IMAGE_DEFAULT_WIDTH set "OFFLINEAI_IMAGE_DEFAULT_WIDTH=640"
+if not defined OFFLINEAI_IMAGE_DEFAULT_HEIGHT set "OFFLINEAI_IMAGE_DEFAULT_HEIGHT=640"
+if not defined OFFLINEAI_IMAGE_DEFAULT_STEPS set "OFFLINEAI_IMAGE_DEFAULT_STEPS=6"
 
 :: ── Ollama ────────────────────────────────────────────────────────
 tasklist /FI "IMAGENAME eq ollama.exe" 2>nul | find /i "ollama.exe" >nul

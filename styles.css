@@ -327,6 +327,45 @@ header {
 }
 .msg-images img:hover { opacity: .88; }
 
+/* ── Generated images ───────────────────────────────── */
+.msg-generated-image { display: flex; flex-wrap: wrap; gap: 6px; }
+.generated-image {
+  max-width: 100%; max-height: 480px;
+  border-radius: 12px; object-fit: contain;
+  cursor: pointer; border: 1px solid var(--border);
+  transition: opacity .2s;
+  display: block;
+}
+.generated-image:hover { opacity: .88; }
+.image-gen-caption {
+  font-size: 12px !important;
+  color: var(--text-3) !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 4px 2px !important;
+  white-space: normal;
+}
+.image-gen-progress {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 15px;
+  background: var(--glass); border: 1px solid var(--border);
+  border-radius: 14px; min-width: 220px;
+}
+.image-gen-label {
+  font-size: 13px; color: var(--text-2);
+}
+.image-gen-bar-wrap {
+  height: 4px; border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+.image-gen-bar {
+  height: 100%; width: 0%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
 .msg-text {
   border-radius: 14px;
   padding: 11px 15px;
@@ -778,6 +817,10 @@ footer  { padding-left:  max(16px, env(safe-area-inset-left));
 .settings-hint {
   font-size: 11px; color: var(--text-3);
   text-transform: none; font-weight: 400; letter-spacing: 0; display: block; margin-top: 2px;
+}
+
+.settings-hint-compact {
+  margin-top: 6px;
 }
 
 .settings-input, .settings-select {

@@ -11,7 +11,7 @@ import threading
 import time
 from pathlib import Path
 from fastapi import FastAPI, File, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import httpx
 
@@ -68,6 +68,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 MAX_BODY   = 50 * 1024 * 1024
 FALLBACK_MODEL = "gemma4:e4b"
+IMAGE_GEN_MAX_WIDTH = int(os.environ.get("OFFLINEAI_IMAGE_MAX_WIDTH", "1024"))
+IMAGE_GEN_MAX_HEIGHT = int(os.environ.get("OFFLINEAI_IMAGE_MAX_HEIGHT", "1024"))
+IMAGE_GEN_MAX_STEPS = int(os.environ.get("OFFLINEAI_IMAGE_MAX_STEPS", "16"))
+IMAGE_GEN_DEFAULT_WIDTH = int(os.environ.get("OFFLINEAI_IMAGE_DEFAULT_WIDTH", "640"))
+IMAGE_GEN_DEFAULT_HEIGHT = int(os.environ.get("OFFLINEAI_IMAGE_DEFAULT_HEIGHT", "640"))
+IMAGE_GEN_DEFAULT_STEPS = int(os.environ.get("OFFLINEAI_IMAGE_DEFAULT_STEPS", "6"))
 
 _TOKEN_STATS_FILE = Path(__file__).parent / "token_stats.json"
 
@@ -91,7 +97,6 @@ def _save_token_stats() -> None:
 _token_stats: dict[str, list[int]] = _load_token_stats()
 
 _BASE = Path(__file__).parent
-_INDEX_HTML = (_BASE / "index.html").read_text(encoding="utf-8")
 _STYLES_CSS = (_BASE / "styles.css").read_text(encoding="utf-8")
 
 if STATIC_DIR.is_dir():
@@ -226,17 +231,20 @@ async def root():
 
 @app.get("/styles.css")
 async def styles():
-    from fastapi.responses import Response
     return Response(_STYLES_CSS, media_type="text/css")
+
+
+async def _ollama_json_request(method: str, path: str, *, body: dict | None = None, timeout: float = 5.0) -> dict:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.request(method, f"{OLLAMA}{path}", json=body)
+        response.raise_for_status()
+        return response.json()
 
 
 @app.get("/api/models")
 async def get_models():
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(f"{OLLAMA}/api/tags")
-            r.raise_for_status()
-            return r.json()
+        return await _ollama_json_request("GET", "/api/tags", timeout=3.0)
     except Exception as exc:
         return {"models": [{"name": FALLBACK_MODEL}], "offline": True, "error": str(exc)}
 
@@ -244,18 +252,15 @@ async def get_models():
 @app.get("/api/status")
 async def status():
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            r = await client.get(f"{OLLAMA}/api/tags")
-            r.raise_for_status()
-            data = r.json()
-            return {
-                "ollama": True,
-                "models_count": len(data.get("models", [])),
-                "lan": HOST in {"0.0.0.0", "::"},
-                "auth_required": AUTH_REQUIRED,
-                "host": HOST,
-                "port": PORT,
-            }
+        data = await _ollama_json_request("GET", "/api/tags", timeout=2.0)
+        return {
+            "ollama": True,
+            "models_count": len(data.get("models", [])),
+            "lan": HOST in {"0.0.0.0", "::"},
+            "auth_required": AUTH_REQUIRED,
+            "host": HOST,
+            "port": PORT,
+        }
     except Exception as exc:
         return JSONResponse(
             {
@@ -302,10 +307,7 @@ async def restart_ollama(request: Request):
 async def show_model(request: Request):
     body = await request.json()
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.post(f"{OLLAMA}/api/show", json=body)
-            r.raise_for_status()
-            return r.json()
+        return await _ollama_json_request("POST", "/api/show", body=body, timeout=5.0)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=502)
 
@@ -442,6 +444,22 @@ def _ndjson_error(message: str) -> bytes:
     return (json.dumps({"error": message}) + "\n").encode()
 
 
+def _clamp_int(value, minimum: int, maximum: int, fallback: int) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = fallback
+    return max(minimum, min(maximum, n))
+
+
+def _apply_image_generation_caps(body: dict) -> dict:
+    capped = dict(body or {})
+    capped["width"] = _clamp_int(capped.get("width"), 256, IMAGE_GEN_MAX_WIDTH, IMAGE_GEN_DEFAULT_WIDTH)
+    capped["height"] = _clamp_int(capped.get("height"), 256, IMAGE_GEN_MAX_HEIGHT, IMAGE_GEN_DEFAULT_HEIGHT)
+    capped["steps"] = _clamp_int(capped.get("steps"), 2, IMAGE_GEN_MAX_STEPS, IMAGE_GEN_DEFAULT_STEPS)
+    return capped
+
+
 async def stream_ollama_response(path: str, body: dict, *, write_timeout: float):
     try:
         async with httpx.AsyncClient(
@@ -570,6 +588,17 @@ async def pull_model(request: Request):
     body = await request.json()
     return StreamingResponse(
         stream_ollama_response("/api/pull", body, write_timeout=30.0),
+        media_type="application/x-ndjson",
+    )
+
+
+@app.post("/api/generate-image")
+async def generate_image(request: Request):
+    """Proxy image generation requests to Ollama's /api/generate endpoint.
+    Supports streaming NDJSON with progress updates and a final base64 image."""
+    body = _apply_image_generation_caps(await request.json())
+    return StreamingResponse(
+        stream_ollama_response("/api/generate", body, write_timeout=300.0),
         media_type="application/x-ndjson",
     )
 

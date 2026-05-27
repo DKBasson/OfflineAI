@@ -5,6 +5,7 @@ SCRIPT_DIR="${0:A:h}"
 cd "$SCRIPT_DIR"
 
 MODEL="gemma4:e4b"
+IMAGE_MODEL="x/z-image-turbo"
 
 echo "══════════════════════════════════════════"
 echo "  OfflineAI — Installer"
@@ -73,7 +74,7 @@ except Exception as e:
     print('  Skipped — will download automatically on first audio upload (' + str(e) + ')')
 "
 
-# ── 4. Ollama ──────────────────────────────────────────────────────
+# ── 5. Ollama ──────────────────────────────────────────────────────
 if ! command -v ollama > /dev/null 2>&1; then
   echo ""
   echo "▶ Installing Ollama..."
@@ -83,7 +84,7 @@ else
   echo "✔ Ollama already installed: $(ollama --version 2>/dev/null || echo 'version unknown')"
 fi
 
-# ── 5. Pull the model ──────────────────────────────────────────────
+# ── 6. Pull the model ──────────────────────────────────────────────
 echo ""
 echo "▶ Checking for model: $MODEL"
 
@@ -108,12 +109,27 @@ else
   echo "✔ Model '$MODEL' ready"
 fi
 
+# ── 7. Pull the image generation model ───────────────────────────
+echo ""
+echo "▶ Checking for image generation model: $IMAGE_MODEL"
+echo "  (~5 GB download — press Ctrl+C to skip, then pull later with: ollama pull $IMAGE_MODEL)"
+
+if ollama list 2>/dev/null | grep -q "^${IMAGE_MODEL}"; then
+  echo "✔ Model '$IMAGE_MODEL' already downloaded"
+else
+  if ollama pull "$IMAGE_MODEL"; then
+    echo "✔ Model '$IMAGE_MODEL' ready"
+  else
+    echo "  Skipped — run 'ollama pull $IMAGE_MODEL' later to enable image generation"
+  fi
+fi
+
 # Stop temporary Ollama instance if we started it
 if [[ "$OLLAMA_WAS_STOPPED" == "true" ]]; then
   kill "$OLLAMA_PID" 2>/dev/null || true
 fi
 
-# ── 6. Vendor front-end assets (for offline use) ───────────────────
+# ── 8. Vendor front-end assets (for offline use) ───────────────────
 STATIC_DIR="$SCRIPT_DIR/static"
 mkdir -p "$STATIC_DIR"
 
@@ -150,7 +166,7 @@ echo "  Run the app with:  ./start.sh"
 echo ""
 echo "  Features enabled:"
 echo "    • Chat with local AI models via Ollama"
-echo "    • Image attachments (vision models)"
+echo "    • Image generation (ask to draw/generate an image)"
 echo "    • Audio transcription (.mp3 .wav .opus .m4a …)"
 echo "    • Document reading (.docx .odt .ods .odp)"
 echo "    • Code & text file attachments"

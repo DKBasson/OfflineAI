@@ -49,6 +49,29 @@
         </div>
         <div class="settings-group">
           <label class="settings-label label-with-tip">
+            <span>Image generation model</span>
+            <span class="settings-tip" tabindex="0" role="note" aria-label="Ollama model for image generation. x/z-image-turbo (photorealistic, 6B) or x/flux2-klein (text rendering, 4B). Pull a model below, then select it here." data-tip="Ollama model for image generation. x/z-image-turbo (photorealistic, 6B) or x/flux2-klein (text rendering, 4B). Pull a model below, then select it here.">i</span>
+          </label>
+          <span class="settings-hint">Triggered when you ask to generate, draw, or create an image.</span>
+          <select class="settings-input" id="image-model-select">
+            <option value="">— no image model selected —</option>
+          </select>
+          <label class="settings-label" for="settings-image-perf">Image performance profile</label>
+          <span class="settings-hint settings-hint-compact">Caps image size and steps to reduce CPU/GPU load and fan noise.</span>
+          <select class="settings-input" id="settings-image-perf">
+            <option value="eco">Eco (640px, 6 steps)</option>
+            <option value="balanced">Balanced (768px, 10 steps)</option>
+            <option value="quality">Quality (1024px, 16 steps)</option>
+          </select>
+          <span class="settings-hint settings-hint-compact">Pull a new image model by name:</span>
+          <div class="pull-row">
+            <input class="settings-input pull-input" id="settings-image-model" type="text" placeholder="e.g. x/z-image-turbo" autocomplete="off" spellcheck="false">
+            <button class="pull-btn" id="pull-image-model-btn">Pull</button>
+          </div>
+          <div id="pull-image-model-status" class="pull-status hidden"></div>
+        </div>
+        <div class="settings-group">
+          <label class="settings-label label-with-tip">
             <span>Context window</span>
             <span class="settings-tip" tabindex="0" role="note" aria-label="How many recent chat messages are included with each request. Higher values improve memory but use more tokens." data-tip="How many recent chat messages are included with each request. Higher values improve memory but use more tokens.">i</span>
           </label>
@@ -302,6 +325,6 @@
   </div>
 
   <script src="/frontend/settings-tooltips.js?v=20260522b" defer></script>
-  <script src="/frontend/app.js?v=20260522b" defer></script>
+  <script src="/frontend/app.js?v=20260527f" defer></script>
 </body>
 </html>
