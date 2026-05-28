@@ -18,3 +18,4 @@ static/
 node_modules/
 playwright-report/
 test-results/
+token_stats.json

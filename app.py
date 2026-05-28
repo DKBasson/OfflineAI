@@ -76,6 +76,9 @@ IMAGE_GEN_DEFAULT_HEIGHT = int(os.environ.get("OFFLINEAI_IMAGE_DEFAULT_HEIGHT", 
 IMAGE_GEN_DEFAULT_STEPS = int(os.environ.get("OFFLINEAI_IMAGE_DEFAULT_STEPS", "6"))
 
 _TOKEN_STATS_FILE = Path(__file__).parent / "token_stats.json"
+# Maximum number of distinct user entries kept in token_stats.json.
+# When exceeded, entries with the lowest total token count are pruned first.
+_MAX_TOKEN_STATS_ENTRIES = int(os.environ.get("OFFLINEAI_MAX_TOKEN_ENTRIES", "500"))
 
 def _load_token_stats() -> dict:
     try:
@@ -89,6 +92,16 @@ def _load_token_stats() -> dict:
     return {}
 
 def _save_token_stats() -> None:
+    global _token_stats
+    # Prune to prevent unbounded growth: keep entries with the highest total tokens.
+    if len(_token_stats) > _MAX_TOKEN_STATS_ENTRIES:
+        _token_stats = dict(
+            sorted(
+                _token_stats.items(),
+                key=lambda x: x[1][0] + x[1][1],
+                reverse=True,
+            )[:_MAX_TOKEN_STATS_ENTRIES]
+        )
     try:
         _TOKEN_STATS_FILE.write_text(json.dumps(_token_stats), encoding="utf-8")
     except Exception:
