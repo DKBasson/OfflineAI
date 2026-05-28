@@ -161,6 +161,65 @@ export async function* streamChat(
   }
 }
 
+// ── Intent classification ─────────────────────────────
+// Sends a fast single-token request to a small model to determine whether the
+// user's message is an image request, a code request, or plain text.
+// Returns 'image' | 'code' | 'text'.  Never throws — falls back to 'text'.
+export async function classifyIntent(
+  text: string,
+  model: string,
+  signal: AbortSignal,
+): Promise<'image' | 'code' | 'text'> {
+  console.log('[intent] classifyIntent called', { model, text: text.slice(0, 100) });
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        model,
+        think: false, // disable chain-of-thought for thinking models (e.g. Qwen3)
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Classify the user message. Reply with exactly one word: image, code, or text.\n' +
+              'image = requests to generate, draw, or create pictures/artwork/photos\n' +
+              'code = any programming task: write, generate, fix, debug, explain, implement code/functions/scripts/algorithms\n' +
+              'text = everything else: questions, chat, analysis, summaries\n\n' +
+              'Examples:\n' +
+              '"draw a cat" → image\n' +
+              '"generate javascript for fibonacci" → code\n' +
+              '"write a python function to sort a list" → code\n' +
+              '"fix this bug" → code\n' +
+              '"what is the capital of France?" → text\n' +
+              '"explain how black holes work" → text\n' +
+              '"create a landscape painting" → image\n\n' +
+              'Reply with only one word.',
+          },
+          { role: 'user', content: text.slice(0, 300) },
+        ],
+        stream: false,
+        options: { temperature: 0, num_predict: 16 },
+      }),
+      signal,
+    });
+    console.log('[intent] HTTP status:', resp.status, resp.ok);
+    const raw = await resp.text();
+    console.log('[intent] raw response:', raw.slice(0, 500));
+    const d = JSON.parse(raw.trim().split('\n')[0]);
+    console.log('[intent] parsed:', d);
+    // thinking models (e.g. Qwen3) may return content:"" with the actual text in thinking
+    const word = (d?.message?.content || d?.message?.thinking || d?.error || '').toLowerCase().trim().split(/\s+/)[0];
+    console.log('[intent] extracted word:', JSON.stringify(word));
+    if (word === 'image') return 'image';
+    if (word === 'code') return 'code';
+    return 'text';
+  } catch (err) {
+    console.warn('[intent] classifyIntent error — falling back to text', err);
+    return 'text';
+  }
+}
+
 export async function generateTitle(
   model: string,
   messages: ChatMessage[],

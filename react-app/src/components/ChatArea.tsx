@@ -11,7 +11,6 @@ export function ChatArea() {
     streamingError,
     imageProgress,
     imageProgressLabel,
-    stopStreaming,
     regenerateLastResponse,
     openLightbox,
   } = useApp();
@@ -48,8 +47,12 @@ export function ChatArea() {
 
           {/* Streaming assistant bubble */}
           {isStreaming && (
-            <div className="message assistant flex gap-3 mb-4 max-w-3xl">
-              <div className="avatar streaming">⚡</div>
+            <div className="message assistant flex gap-3 mb-4 max-w-3xl items-start">
+              <div className="avatar streaming mt-[1px]">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2C12 7 17 12 22 12C17 12 12 17 12 22C12 17 7 12 2 12C7 12 12 7 12 2Z" />
+                </svg>
+              </div>
               <div className="message-body flex-1 min-w-0">
                 {imageProgress != null ? (
                   /* Image generation progress */
@@ -80,25 +83,18 @@ export function ChatArea() {
 
           {/* Persistent error bubble after failed streaming */}
           {!isStreaming && streamingError && (
-            <div className="message assistant flex gap-3 mb-4 max-w-3xl">
-              <div className="avatar">⚡</div>
+            <div className="message assistant flex gap-3 mb-4 max-w-3xl items-start">
+              <div className="avatar mt-[1px]">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2C12 7 17 12 22 12C17 12 12 17 12 22C12 17 7 12 2 12C7 12 12 7 12 2Z" />
+                </svg>
+              </div>
               <div className="message-body flex-1 min-w-0">
                 <div className="msg-text error">{streamingError}</div>
               </div>
             </div>
           )}
 
-          {/* Stop streaming button */}
-          {isStreaming && (
-            <div className="flex justify-center mt-2 mb-4">
-              <button
-                className="px-4 py-1.5 bg-surface-md border border-border rounded-full text-text-muted text-[13px] hover:bg-surface-hi hover:text-text-primary transition-colors"
-                onClick={stopStreaming}
-              >
-                Stop generating
-              </button>
-            </div>
-          )}
         </>
       )}
       <div ref={bottomRef} />

@@ -54,6 +54,21 @@ if errorlevel 1 (
 :ollama_ready
 echo [OK] Ollama running
 
+:: ── Build React UI ────────────────────────────────────────────────
+if exist "%SCRIPT_DIR%\react-app\node_modules" (
+    echo [>>] Building UI...
+    cd /d "%SCRIPT_DIR%\react-app"
+    call npm run build
+    cd /d "%SCRIPT_DIR%"
+    if errorlevel 1 (
+        echo [!] UI build failed — using existing build.
+    ) else (
+        echo [OK] UI built
+    )
+) else (
+    echo [!] Skipping UI build ^(react-app\node_modules missing — run install.bat first^)
+)
+
 :: ── FastAPI app ────────────────────────────────────────────────────
 echo [>>] Starting OfflineAI...
 

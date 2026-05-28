@@ -22,6 +22,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoTitle: true,
   imageModel: 'x/z-image-turbo',
   imagePerfProfile: 'eco',
+  intentModel: '',
+  codeModel: '',
 };
 
 export const IMAGE_PERF_PRESETS: Record<ImagePerfProfile, ImagePerfConfig> = {

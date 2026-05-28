@@ -73,6 +73,14 @@ else
   echo "✔ Ollama already running"
 fi
 
+# ── Build React UI ────────────────────────────────────────────────
+if [[ -d "$SCRIPT_DIR/react-app/node_modules" ]]; then
+  echo "▶ Building UI..."
+  (cd "$SCRIPT_DIR/react-app" && npm run build) && echo "✔ UI built" || echo "⚠ UI build failed — using existing build"
+else
+  echo "⚠ Skipping UI build (react-app/node_modules missing — run install.sh first)"
+fi
+
 # ── FastAPI app ────────────────────────────────────────────────────
 echo "▶ Starting OfflineAI..."
 source "$SCRIPT_DIR/.venv/bin/activate"
