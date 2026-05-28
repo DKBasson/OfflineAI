@@ -52,8 +52,8 @@ function UserBubble({
   const initial = username ? username[0].toUpperCase() : 'U';
 
   return (
-    <div className="message user flex gap-3 mb-4 max-w-3xl self-end ml-auto flex-row-reverse" data-role="user">
-      <div className="avatar">{initial}</div>
+    <div className="message user flex gap-3 mb-4 max-w-3xl self-end ml-auto flex-row-reverse items-start group" data-role="user">
+      <div className="avatar mt-[1px]">{initial}</div>
       <div className="message-body flex-1 min-w-0">
         {message.images && message.images.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
@@ -104,8 +104,12 @@ function AssistantBubble({
   }, [rendered]);
 
   return (
-    <div className="message assistant flex gap-3 mb-4 max-w-3xl" data-role="assistant">
-      <div className="avatar">⚡</div>
+    <div className="message assistant flex gap-3 mb-4 max-w-3xl items-start group" data-role="assistant">
+      <div className="avatar mt-[1px]">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2C12 7 17 12 22 12C17 12 12 17 12 22C12 17 7 12 2 12C7 12 12 7 12 2Z" />
+        </svg>
+      </div>
       <div className="message-body flex-1 min-w-0" ref={bodyRef}>
         {message.generatedImage ? (
           <>
@@ -128,6 +132,20 @@ function AssistantBubble({
             className="msg-text prose-msg"
             dangerouslySetInnerHTML={{ __html: rendered }}
           />
+        )}
+        {message.intent && (
+          <div className="mt-3 flex items-center gap-1.5 text-[11px] select-none opacity-40 hover:opacity-75 transition-opacity cursor-default">
+            <span className="text-text-dim">↳</span>
+            <span className="font-mono text-accent">
+              {message.intent === 'code' ? '</>' : message.intent === 'image' ? '◆' : '◇'}
+            </span>
+            <span className="text-text-dim">
+              {message.intent}
+              {message.modelUsed && (
+                <> &middot; <span className="font-mono text-text-primary opacity-70">{message.modelUsed}</span></>
+              )}
+            </span>
+          </div>
         )}
         <MessageActions
           content={message.content}

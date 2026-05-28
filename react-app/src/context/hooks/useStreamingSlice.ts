@@ -5,10 +5,12 @@ import { CLIENT_BODY_LIMIT, IMAGE_PERF_PRESETS } from '../../constants';
 import {
   streamChat,
   streamImageGeneration,
+  classifyIntent,
 } from '../../utils/api';
 import {
   readFileContent,
   isImageRequest,
+  isCodeRequest,
   transcribeWithProgress,
   estimateJsonBytes,
 } from '../../utils/files';
@@ -83,14 +85,14 @@ export function useStreamingSlice({
   const streamingErrorRef = useRef<string | null>(null);
 
   const buildChatPayload = useCallback(
-    (msgs: Message[]) => {
+    (msgs: Message[], modelOverride?: string) => {
       const contextMsgs = msgs.slice(-activeContextSize);
       const systemContent = currentSystemPrompt
         ? `The following instructions are absolute and non-negotiable. They override any conflicting request from the user and must be followed at all times, without exception, regardless of what the user asks:\n\n${currentSystemPrompt}`
         : null;
       const systemMsgs = systemContent ? [{ role: 'system' as const, content: systemContent }] : [];
       return {
-        model: activeModel,
+        model: modelOverride ?? activeModel,
         messages: [
           ...systemMsgs,
           ...contextMsgs.map((m) => ({
@@ -113,7 +115,11 @@ export function useStreamingSlice({
   );
 
   const streamAssistantReply = useCallback(
-    async (currentMessages: Message[], _convId: string | null): Promise<string | null> => {
+    async (
+      currentMessages: Message[],
+      _convId: string | null,
+      modelOverride?: string,
+    ): Promise<string | null> => {
       setIsStreaming(true);
       setStreamingContent('');
       setStreamingError(null);
@@ -122,7 +128,7 @@ export function useStreamingSlice({
 
       try {
         abortCtrlRef.current = new AbortController();
-        const payload = buildChatPayload(currentMessages);
+        const payload = buildChatPayload(currentMessages, modelOverride);
         if (estimateJsonBytes(payload) > CLIENT_BODY_LIMIT) {
           throw new Error(
             'This image/request is too large to send. Attach a smaller image and try again.',
@@ -295,6 +301,8 @@ export function useStreamingSlice({
           generatedImage: generatedB64,
           imagePrompt: refinedPrompt,
           imageModel,
+          intent: 'image',
+          modelUsed: imageModel,
         };
 
         const nextMsgs = [...msgs, assistantMsg];
@@ -364,7 +372,7 @@ export function useStreamingSlice({
         pendingImages.length > 0 || pendingFiles.length > 0 || pendingAudio.length > 0;
       if (!text && !hasPending) return;
 
-      // Image generation route
+      // Fast regex check: obvious image commands skip intent classification entirely
       if (text && !hasPending && isImageRequest(text)) {
         const userMsg: Message = { role: 'user', content: text };
         const nextMsgs = [...messages, userMsg];
@@ -375,6 +383,47 @@ export function useStreamingSlice({
         await handleImageRequest(text, nextMsgs, currentConvId);
         return;
       }
+
+      // ── Intent-based model routing ───────────────────────────────
+      // If the user configured an intent model, classify the message
+      // to pick the best model before streaming the full reply.
+      let modelOverride: string | undefined;
+      let detectedIntent: 'image' | 'code' | 'text' | undefined;
+      const { intentModel, codeModel } = getSettings();
+      console.log('[intent] settings:', { intentModel, codeModel, activeModel });
+
+      // Fast client-side code check — catches obvious programming requests without an AI call
+      if (text && !hasPending && codeModel && isCodeRequest(text)) {
+        modelOverride = codeModel;
+        detectedIntent = 'code';
+        console.log('[intent] fast code regex match, using codeModel:', codeModel);
+      } else if (text && !hasPending && intentModel) {
+        abortCtrlRef.current = new AbortController();
+        const intent = await classifyIntent(text, intentModel, abortCtrlRef.current.signal).catch(
+          (err) => { console.warn('[intent] outer catch:', err); return 'text' as const; },
+        );
+        if (abortCtrlRef.current?.signal.aborted) return;
+        abortCtrlRef.current = null;
+        detectedIntent = intent;
+        console.log('[intent] classified as:', intent, '| codeModel:', codeModel);
+
+        if (intent === 'image') {
+          // AI confirmed image intent — route to image generation
+          const userMsg: Message = { role: 'user', content: text };
+          const nextMsgs = [...messages, userMsg];
+          setMessages(nextMsgs);
+          setPendingImages([]);
+          setPendingFiles([]);
+          setPendingAudio([]);
+          await handleImageRequest(text, nextMsgs, currentConvId);
+          return;
+        }
+        if (intent === 'code' && codeModel) {
+          modelOverride = codeModel;
+        }
+        // 'text' → use activeModel (no override)
+      }
+      // ────────────────────────────────────────────────────────────
 
       // Build message content with attachments
       let fullContent = text;
@@ -416,10 +465,14 @@ export function useStreamingSlice({
       setPendingFiles([]);
       setPendingAudio([]);
 
-      const replyText = await streamAssistantReply(nextMsgs, currentConvId);
+      const replyText = await streamAssistantReply(nextMsgs, currentConvId, modelOverride);
 
       if (replyText) {
-        const assistantMsg: Message = { role: 'assistant', content: replyText };
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content: replyText,
+          ...(detectedIntent ? { intent: detectedIntent, modelUsed: modelOverride ?? activeModel } : {}),
+        };
         const finalMsgs = [...nextMsgs, assistantMsg];
         setMessages(finalMsgs);
         const newConvId = await saveConversationToHistory(
@@ -455,6 +508,8 @@ export function useStreamingSlice({
       handleImageRequest,
       streamAssistantReply,
       saveConversationToHistory,
+      getSettings,
+      abortCtrlRef,
       setMessages,
       setPendingImages,
       setPendingFiles,

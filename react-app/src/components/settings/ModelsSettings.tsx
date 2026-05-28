@@ -105,6 +105,85 @@ export function ModelsSettings({
         </div>
       </div>
 
+      {/* ════ MODEL ROUTING ════ */}
+      <div className="settings-card">
+        <div className="settings-card-header">
+          <span className="settings-card-title">Model routing</span>
+        </div>
+        <div className="settings-card-body">
+          <p className="text-[11.5px] text-text-dim">
+            When an intent model is set, each message is first classified as{' '}
+            <strong className="text-text-muted">image</strong>,{' '}
+            <strong className="text-text-muted">code</strong>, or{' '}
+            <strong className="text-text-muted">text</strong> — then the matching model is used
+            automatically. Leave empty to disable.
+          </p>
+
+          <div>
+            <label className="settings-label">
+              Intent model{' '}
+              <span className="font-normal text-text-dim ml-1">classifies each request</span>
+            </label>
+            <select
+              className="settings-input"
+              value={form.intentModel}
+              onChange={(e) => setField('intentModel', e.target.value)}
+            >
+              <option value="">— disabled —</option>
+              {downloadedModels.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11.5px] text-text-dim mt-1">
+              Use a small, fast model (e.g. gemma3:1b). Adds one quick call before each reply.
+            </p>
+          </div>
+
+          <div>
+            <label className="settings-label">
+              Text model{' '}
+              <span className="font-normal text-text-dim ml-1">used for chat &amp; questions</span>
+            </label>
+            <select
+              className="settings-input"
+              value={form.model}
+              onChange={(e) => setField('model', e.target.value)}
+            >
+              <option value="">— none —</option>
+              {downloadedModels.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="settings-label">
+              Code model{' '}
+              <span className="font-normal text-text-dim ml-1">used for code requests</span>
+            </label>
+            <select
+              className="settings-input"
+              value={form.codeModel}
+              onChange={(e) => setField('codeModel', e.target.value)}
+            >
+              <option value="">— same as text model —</option>
+              {downloadedModels.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11.5px] text-text-dim mt-1">
+              Falls back to the text model when empty.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* ════ IMAGE GENERATION ════ */}
       <div className="settings-card">
         <div className="settings-card-header">

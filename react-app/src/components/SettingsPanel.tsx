@@ -31,6 +31,7 @@ export function SettingsPanel() {
     updateModelHealth,
   } = useApp();
 
+  const [activeTab, setActiveTab] = useState<'general' | 'models' | 'prompts' | 'system'>('general');
   const [form, setForm] = useState<Settings>(loadSettings);
   const [pullModelInput, setPullModelInput] = useState('');
   const [pullImageInput, setPullImageInput] = useState('');
@@ -62,7 +63,10 @@ export function SettingsPanel() {
   }, [getSavedPrompts, refreshDownloadedModels, updateModelHealth]);
 
   useEffect(() => {
-    if (isSettingsOpen) refreshState();
+    if (isSettingsOpen) {
+      setActiveTab('general');
+      refreshState();
+    }
   }, [isSettingsOpen, refreshState]);
 
   // Clear pull input after successful pull
@@ -130,53 +134,87 @@ export function SettingsPanel() {
           </button>
         </div>
 
-        {/* Scrollable content */}
+        {/* Tab bar */}
+        <div
+          className="flex shrink-0 mt-3 mx-5"
+          style={{ borderBottom: '1px solid var(--border)' }}
+          role="tablist"
+        >
+          {(
+            [
+              { id: 'general', label: 'General' },
+              { id: 'models',  label: 'Models'  },
+              { id: 'prompts', label: 'Prompts'  },
+              { id: 'system',  label: 'System'   },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={`settings-tab ${activeTab === tab.id ? 'settings-tab-active' : 'settings-tab-inactive'}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab content */}
         <div className="flex-1 overflow-y-auto px-5 py-5">
-          <GeneralSettings form={form} setField={setField} />
+          {activeTab === 'general' && (
+            <GeneralSettings form={form} setField={setField} />
+          )}
 
-          <ModelsSettings
-            form={form}
-            setField={setField}
-            downloadedModels={downloadedModels}
-            imageModels={imageModels}
-            pullModelInput={pullModelInput}
-            setPullModelInput={setPullModelInput}
-            pullImageInput={pullImageInput}
-            setPullImageInput={setPullImageInput}
-            pullStatus={pullStatus}
-            pullImageStatus={pullImageStatus}
-            onPullModel={pullModel}
-            onPullImageModel={pullImageModel}
-          />
+          {activeTab === 'models' && (
+            <ModelsSettings
+              form={form}
+              setField={setField}
+              downloadedModels={downloadedModels}
+              imageModels={imageModels}
+              pullModelInput={pullModelInput}
+              setPullModelInput={setPullModelInput}
+              pullImageInput={pullImageInput}
+              setPullImageInput={setPullImageInput}
+              pullStatus={pullStatus}
+              pullImageStatus={pullImageStatus}
+              onPullModel={pullModel}
+              onPullImageModel={pullImageModel}
+            />
+          )}
 
-          <PromptsSettings
-            prompts={prompts}
-            defaultPromptId={form.defaultPromptId}
-            onSetDefault={setDefaultPrompt}
-            onReorder={reorderPrompts}
-            onDuplicate={duplicatePrompt}
-            onDelete={deletePrompt}
-            onSave={savePrompt}
-            onPromptsChanged={() => setPrompts(getSavedPrompts())}
-            form={form}
-            setField={setField}
-          />
+          {activeTab === 'prompts' && (
+            <PromptsSettings
+              prompts={prompts}
+              defaultPromptId={form.defaultPromptId}
+              onSetDefault={setDefaultPrompt}
+              onReorder={reorderPrompts}
+              onDuplicate={duplicatePrompt}
+              onDelete={deletePrompt}
+              onSave={savePrompt}
+              onPromptsChanged={() => setPrompts(getSavedPrompts())}
+              form={form}
+              setField={setField}
+            />
+          )}
 
-          <SystemSettings
-            form={form}
-            setField={setField}
-            modelHealth={modelHealth}
-            ollamaRestartStatus={ollamaRestartStatus}
-            isLocalhost={isLocalhost}
-            onRestartOllama={restartOllama}
-            onResetTokenCounter={resetTokenCounter}
-            onClearHistory={() => {
-              if (confirm('Clear all conversation history? This cannot be undone.')) {
-                clearAllHistory();
-                closeSettings();
-              }
-            }}
-          />
+          {activeTab === 'system' && (
+            <SystemSettings
+              form={form}
+              setField={setField}
+              modelHealth={modelHealth}
+              ollamaRestartStatus={ollamaRestartStatus}
+              isLocalhost={isLocalhost}
+              onRestartOllama={restartOllama}
+              onResetTokenCounter={resetTokenCounter}
+              onClearHistory={() => {
+                if (confirm('Clear all conversation history? This cannot be undone.')) {
+                  clearAllHistory();
+                  closeSettings();
+                }
+              }}
+            />
+          )}
         </div>
 
         {/* Save button */}

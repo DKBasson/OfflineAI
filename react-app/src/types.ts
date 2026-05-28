@@ -5,6 +5,8 @@ export interface Message {
   generatedImage?: string;
   imagePrompt?: string;
   imageModel?: string;
+  intent?: 'image' | 'code' | 'text';
+  modelUsed?: string;
 }
 
 export interface PendingImage {
@@ -53,6 +55,8 @@ export interface Settings {
   autoTitle: boolean;
   imageModel: string;
   imagePerfProfile: ImagePerfProfile;
+  intentModel: string;
+  codeModel: string;
 }
 
 export interface TokenStats {
