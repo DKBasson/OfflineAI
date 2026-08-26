@@ -1,4 +1,5 @@
 import { AUTH_TOKEN_KEY } from '../constants';
+import type { Project, ProjectFile, ResearchEvent } from '../types';
 
 export function getAuthToken(): string | null {
   return sessionStorage.getItem(AUTH_TOKEN_KEY);
@@ -125,7 +126,7 @@ export type ChatMessage = { role: string; content: string; images?: string[] };
 export async function* streamChat(
   body: Record<string, unknown>,
   signal: AbortSignal,
-): AsyncGenerator<{ content?: string; done?: boolean; error?: string }> {
+): AsyncGenerator<{ content?: string; done?: boolean; error?: string; tokens?: number }> {
   const resp = await fetch('/api/chat', {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -154,7 +155,7 @@ export async function* streamChat(
       try {
         const d = JSON.parse(line);
         if (d.error) { yield { error: d.error }; return; }
-        if (d.done) yield { done: true };
+        if (d.done) yield { done: true, tokens: d.eval_count || 0 };
         if (d.message?.content) yield { content: d.message.content };
       } catch { /* ignore */ }
     }
@@ -169,7 +170,7 @@ export async function classifyIntent(
   text: string,
   model: string,
   signal: AbortSignal,
-): Promise<'image' | 'code' | 'text'> {
+): Promise<'image' | 'code' | 'text' | 'search'> {
   console.log('[intent] classifyIntent called', { model, text: text.slice(0, 100) });
   try {
     const resp = await fetch('/api/chat', {
@@ -182,15 +183,18 @@ export async function classifyIntent(
           {
             role: 'system',
             content:
-              'Classify the user message. Reply with exactly one word: image, code, or text.\n' +
+              'Classify the user message. Reply with exactly one word: image, code, search, or text.\n' +
               'image = requests to generate, draw, or create pictures/artwork/photos\n' +
               'code = any programming task: write, generate, fix, debug, explain, implement code/functions/scripts/algorithms\n' +
-              'text = everything else: questions, chat, analysis, summaries\n\n' +
+              'search = questions about current events, recent news, real-time data, live prices, weather, sports scores, or anything that requires up-to-date internet information\n' +
+              'text = everything else: questions answerable from general knowledge, chat, analysis, summaries\n\n' +
               'Examples:\n' +
               '"draw a cat" → image\n' +
               '"generate javascript for fibonacci" → code\n' +
-              '"write a python function to sort a list" → code\n' +
-              '"fix this bug" → code\n' +
+              '"what is the latest news about AI?" → search\n' +
+              '"what is the current bitcoin price?" → search\n' +
+              '"who won the game last night?" → search\n' +
+              '"what is the weather in Tokyo?" → search\n' +
               '"what is the capital of France?" → text\n' +
               '"explain how black holes work" → text\n' +
               '"create a landscape painting" → image\n\n' +
@@ -213,6 +217,7 @@ export async function classifyIntent(
     console.log('[intent] extracted word:', JSON.stringify(word));
     if (word === 'image') return 'image';
     if (word === 'code') return 'code';
+    if (word === 'search') return 'search';
     return 'text';
   } catch (err) {
     console.warn('[intent] classifyIntent error — falling back to text', err);
@@ -278,6 +283,9 @@ export async function* streamImageGeneration(
   const reader = resp.body!.getReader();
   const dec = new TextDecoder();
   let buf = '';
+  // Ollama streams image data across many NDJSON lines, each with a partial
+  // base64 string in the `response` field. Accumulate until `done: true`.
+  let accumulatedResponse = '';
 
   while (true) {
     const { done, value } = await reader.read();
@@ -290,27 +298,52 @@ export async function* streamImageGeneration(
       try {
         const d = JSON.parse(line);
         if (d.error) { yield { error: d.error }; return; }
+
+        // Track diffusion step progress
         if (d.total && d.completed != null) {
           yield { progress: Math.min(99, Math.round((d.completed / d.total) * 100)) };
         }
-        const imageB64 = extractImagePayload(d);
-        if (imageB64) { yield { image: imageB64, progress: 100 }; return; }
-        if (typeof d.response === 'string' && d.response && !imageB64) {
-          yield { status: d.response };
+
+        // Accumulate the response field (base64 image data comes in chunks)
+        if (typeof d.response === 'string' && d.response) {
+          accumulatedResponse += d.response;
         }
-      } catch { /* ignore */ }
+
+        // Check for explicit `image` or `images` fields (some models may use these)
+        const directImage = extractImagePayload(d);
+        if (directImage) { yield { image: directImage, progress: 100 }; return; }
+
+        // When done, the accumulated response IS the base64 image
+        if (d.done) {
+          if (accumulatedResponse) {
+            const cleaned = accumulatedResponse.replace(/\s+/g, '');
+            // Verify it looks like base64 data
+            if (cleaned.length > 100 && /^[A-Za-z0-9+/=]+$/.test(cleaned)) {
+              yield { image: cleaned, progress: 100 };
+              return;
+            }
+          }
+        }
+      } catch { /* ignore malformed JSON lines */ }
+    }
+  }
+
+  // If we exit the loop without finding an image, check what we accumulated
+  if (accumulatedResponse) {
+    const cleaned = accumulatedResponse.replace(/\s+/g, '');
+    if (cleaned.length > 100 && /^[A-Za-z0-9+/=]+$/.test(cleaned)) {
+      yield { image: cleaned, progress: 100 };
+      return;
     }
   }
 }
 
 function extractImagePayload(payload: Record<string, unknown>): string | null {
+  // Check explicit image fields (not the streaming `response` field — that's handled by accumulation)
   const raw =
     (payload.image as string | undefined) ||
     (Array.isArray(payload.images) ? (payload.images[0] as string) : null) ||
-    (typeof payload.images === 'string' ? payload.images : null) ||
-    (typeof payload.response === 'string' && /^[A-Za-z0-9+/=\s]+$/.test(payload.response as string)
-      ? (payload.response as string)
-      : null);
+    (typeof payload.images === 'string' ? payload.images : null);
   if (!raw || typeof raw !== 'string') return null;
   return raw.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').replace(/\s+/g, '');
 }
@@ -325,6 +358,37 @@ export async function extractDocument(file: File): Promise<string> {
   }
   const data = await r.json();
   return (data as { text: string }).text;
+}
+
+export interface WebSearchResult {
+  title: string;
+  href: string;
+  body: string;
+}
+
+export async function webSearch(
+  query: string,
+  maxResults = 5,
+  signal?: AbortSignal,
+): Promise<WebSearchResult[]> {
+  try {
+    const r = await fetch('/api/search', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ query, max_results: maxResults }),
+      signal,
+    });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      console.warn('[webSearch] error:', (data as { error?: string }).error);
+      return [];
+    }
+    const data = await r.json();
+    return (data as { results: WebSearchResult[] }).results || [];
+  } catch (err) {
+    console.warn('[webSearch] failed:', err);
+    return [];
+  }
 }
 
 export async function* transcribeAudio(
@@ -353,6 +417,155 @@ export async function* transcribeAudio(
       if (!line.startsWith('data: ')) continue;
       try {
         const evt = JSON.parse(line.slice(6));
+        yield evt;
+        if (evt.type === 'done' || evt.type === 'error') return;
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+// ── Projects API ─────────────────────────────────────
+
+export async function fetchProjects(): Promise<Project[]> {
+  try {
+    const r = await fetch('/api/projects', { headers: authHeaders() });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return (data as { projects: Project[] }).projects || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function createProject(
+  name: string,
+  description: string,
+): Promise<Project | null> {
+  try {
+    const r = await fetch('/api/projects', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ name, description }),
+    });
+    if (!r.ok) return null;
+    return r.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteProject(id: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchProjectFiles(id: string): Promise<ProjectFile[]> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(id)}/files`, {
+      headers: authHeaders(),
+    });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return (data as { files: ProjectFile[] }).files || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function readProjectFile(projectId: string, filePath: string): Promise<string | null> {
+  try {
+    const r = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/files/${filePath}`,
+      { headers: authHeaders() },
+    );
+    if (!r.ok) return null;
+    const data = await r.json();
+    return (data as { content: string }).content ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeProjectFile(
+  projectId: string,
+  filePath: string,
+  content: string,
+): Promise<boolean> {
+  try {
+    const r = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/files/${filePath}`,
+      {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ content }),
+      },
+    );
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteProjectFile(projectId: string, filePath: string): Promise<boolean> {
+  try {
+    const r = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/files/${filePath}`,
+      { method: 'DELETE', headers: authHeaders() },
+    );
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export function getProjectDownloadUrl(projectId: string, filePath: string): string {
+  const token = getAuthToken();
+  const base = `/api/projects/${encodeURIComponent(projectId)}/download/${filePath}`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
+export async function* streamResearch(
+  projectId: string,
+  topic: string,
+  depth: 'quick' | 'standard' | 'deep' = 'standard',
+  signal?: AbortSignal,
+): AsyncGenerator<ResearchEvent> {
+  const r = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/research`,
+    {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ topic, depth }),
+      signal,
+    },
+  );
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    yield { type: 'error', error: (d as { error?: string }).error || `Research failed (${r.status})` };
+    return;
+  }
+
+  const reader = r.body!.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop()!;
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const evt = JSON.parse(line.slice(6)) as ResearchEvent;
         yield evt;
         if (evt.type === 'done' || evt.type === 'error') return;
       } catch { /* ignore */ }

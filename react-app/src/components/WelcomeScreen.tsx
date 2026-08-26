@@ -1,9 +1,16 @@
 import { useApp } from '../context/AppContext';
+import { CONVERSATION_TEMPLATES } from '../constants';
 
 export function WelcomeScreen() {
-  const { activeUsername, activeModel } = useApp();
+  const { activeUsername, activeModel, sendMessage } = useApp();
 
   const greeting = activeUsername ? `Hello, ${activeUsername}` : 'OfflineAI';
+
+  const handleTemplate = (template: typeof CONVERSATION_TEMPLATES[number]) => {
+    // Send the template's starter prompt as the first user message.
+    // The system prompt context is woven into the message naturally.
+    sendMessage(template.systemPrompt + '\n\nPlease greet the user with: "' + template.starterMessage + '"');
+  };
 
   return (
     <div
@@ -18,6 +25,24 @@ export function WelcomeScreen() {
       <p className="text-[11px] mt-2 tracking-widest uppercase" style={{ color: 'var(--text-3)' }}>
         Local · Private · No cloud
       </p>
+
+      {/* Conversation Templates */}
+      <div className="mt-8 w-full max-w-md px-4">
+        <p className="text-[11px] text-text-dim uppercase tracking-wider mb-3">Quick start</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {CONVERSATION_TEMPLATES.map((tpl) => (
+            <button
+              key={tpl.id}
+              onClick={() => handleTemplate(tpl)}
+              className="flex flex-col items-center gap-1.5 px-3 py-3 bg-surface border border-border rounded-lg hover:bg-surface-md hover:border-border-hi transition-colors cursor-pointer text-center"
+              title={tpl.systemPrompt}
+            >
+              <span className="text-lg">{tpl.icon}</span>
+              <span className="text-[12px] text-text-primary font-medium">{tpl.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

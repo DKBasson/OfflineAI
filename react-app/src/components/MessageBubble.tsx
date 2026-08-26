@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Message } from '../types';
+import type { Message, SearchResult } from '../types';
 import { renderMarkdown, highlightCodeBlocks } from '../utils/markdown';
 import { useApp } from '../context/AppContext';
 
@@ -72,6 +72,11 @@ function UserBubble({
           <div className="msg-text user-msg">{message.content}</div>
         )}
         <MessageActions content={message.content} />
+        {message.timestamp && (
+          <div className="text-[10px] text-text-dim mt-1 opacity-0 group-hover:opacity-60 transition-opacity">
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -137,7 +142,7 @@ function AssistantBubble({
           <div className="mt-3 flex items-center gap-1.5 text-[11px] select-none opacity-40 hover:opacity-75 transition-opacity cursor-default">
             <span className="text-text-dim">↳</span>
             <span className="font-mono text-accent">
-              {message.intent === 'code' ? '</>' : message.intent === 'image' ? '◆' : '◇'}
+              {message.intent === 'code' ? '</>' : message.intent === 'image' ? '◆' : message.intent === 'search' ? '🔍' : '◇'}
             </span>
             <span className="text-text-dim">
               {message.intent}
@@ -147,11 +152,24 @@ function AssistantBubble({
             </span>
           </div>
         )}
+        {message.searchResults && message.searchResults.length > 0 && (
+          <SearchSources results={message.searchResults} />
+        )}
         <MessageActions
           content={message.content}
           showRegenerate={isLast && !!onRegenerate}
           onRegenerate={onRegenerate}
         />
+        {(message.timestamp || message.tokens) && (
+          <div className="text-[10px] text-text-dim mt-1 opacity-0 group-hover:opacity-60 transition-opacity flex gap-2">
+            {message.timestamp && (
+              <span>{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            )}
+            {message.tokens && message.tokens > 0 && (
+              <span>{message.tokens} tokens</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -192,6 +210,42 @@ function MessageActions({
         >
           Regenerate
         </button>
+      )}
+    </div>
+  );
+}
+
+function SearchSources({ results }: { results: SearchResult[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mt-2 border-t border-border/50 pt-2">
+      <button
+        className="flex items-center gap-1.5 text-[11px] text-text-dim hover:text-text-muted transition-colors cursor-pointer select-none"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-label="Toggle search sources"
+      >
+        <span>🔍</span>
+        <span>{results.length} web source{results.length !== 1 ? 's' : ''}</span>
+        <span className="text-[9px]">{expanded ? '▲' : '▼'}</span>
+      </button>
+      {expanded && (
+        <div className="mt-1.5 space-y-1.5">
+          {results.map((r, i) => (
+            <div key={i} className="text-[11px] leading-relaxed">
+              <a
+                href={r.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent hover:underline font-medium"
+              >
+                {r.title}
+              </a>
+              <p className="text-text-dim mt-0.5 line-clamp-2">{r.body}</p>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

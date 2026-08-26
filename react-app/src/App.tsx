@@ -9,6 +9,7 @@ import { NameModal } from './components/NameModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { Lightbox } from './components/Lightbox';
 import { DragOverlay } from './components/DragOverlay';
+import { ProjectsPanel } from './components/ProjectsPanel';
 
 function AppInner() {
   const {
@@ -26,6 +27,9 @@ function AppInner() {
     setNameModalOpen,
     activeUsername,
     messages,
+    isProjectsPanelOpen,
+    openProjectsPanel,
+    closeProjectsPanel,
   } = useApp();
 
   const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
@@ -48,6 +52,7 @@ function AppInner() {
       if (mod && e.key === 'l') { e.preventDefault(); isSidebarOpen ? closeSidebar() : openSidebar(); }
       if (mod && e.key === 'e') { e.preventDefault(); if (messages.length) exportConversation(); }
       if (mod && e.key === '/') { e.preventDefault(); document.getElementById('input')?.focus(); }
+      if (mod && e.key === 'p') { e.preventDefault(); isProjectsPanelOpen ? closeProjectsPanel() : openProjectsPanel(); }
       if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         document.body.classList.toggle('focus-mode');
@@ -69,6 +74,9 @@ function AppInner() {
     isSidebarOpen,
     exportConversation,
     messages.length,
+    isProjectsPanelOpen,
+    openProjectsPanel,
+    closeProjectsPanel,
   ]);
 
   // Drag-and-drop
@@ -108,6 +116,7 @@ function AppInner() {
     <div className="flex flex-col h-[100dvh] overflow-hidden bg-bg text-text-primary font-sans">
       <Sidebar />
       <SettingsPanel />
+      <ProjectsPanel />
       <NameModal />
       <ShortcutsModal />
       <Lightbox />

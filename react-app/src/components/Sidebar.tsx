@@ -1,7 +1,9 @@
+import { useCallback, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import type { Conversation } from '../types';
 import { formatDate } from '../utils/markdown';
 import { FALLBACK_MODEL } from '../constants';
+import { parseMarkdownConversation } from '../utils/files';
 
 export function Sidebar() {
   const {
@@ -15,7 +17,28 @@ export function Sidebar() {
     deleteConversation,
     startNewChat,
     isStreaming,
+    activeModel,
   } = useApp();
+
+  const importRef = useRef<HTMLInputElement>(null);
+
+  const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const parsed = parseMarkdownConversation(text);
+    if (parsed) {
+      const conv: Conversation = {
+        id: String(Date.now()),
+        title: parsed.title,
+        timestamp: Date.now(),
+        model: activeModel,
+        messages: parsed.messages,
+      };
+      loadConversation(conv);
+    }
+    e.target.value = '';
+  }, [activeModel, loadConversation]);
 
   const filtered = historySearchTerm
     ? history.filter((item) => {
@@ -98,13 +121,30 @@ export function Sidebar() {
         </div>
 
         {/* New chat button */}
-        <button
-          id="new-chat-btn"
-          className="m-2.5 py-2.5 bg-surface-md border border-border-hi rounded-[9px] text-accent text-[13px] font-semibold cursor-pointer text-center hover:bg-accent-lo hover:border-accent-b transition-colors shrink-0"
-          onClick={() => { startNewChat(); closeSidebar(); }}
-        >
-          + New Chat
-        </button>
+        <div className="m-2.5 flex gap-2 shrink-0">
+          <button
+            id="new-chat-btn"
+            className="flex-1 py-2.5 bg-surface-md border border-border-hi rounded-[9px] text-accent text-[13px] font-semibold cursor-pointer text-center hover:bg-accent-lo hover:border-accent-b transition-colors"
+            onClick={() => { startNewChat(); closeSidebar(); }}
+          >
+            + New Chat
+          </button>
+          <button
+            className="py-2.5 px-3 bg-surface-md border border-border-hi rounded-[9px] text-text-muted text-[13px] font-semibold cursor-pointer text-center hover:bg-surface-hi hover:border-border-hi hover:text-text-primary transition-colors"
+            onClick={() => importRef.current?.click()}
+            title="Import conversation from Markdown file"
+            aria-label="Import conversation"
+          >
+            ↑ Import
+          </button>
+        </div>
+        <input
+          ref={importRef}
+          type="file"
+          accept=".md,.markdown,.txt"
+          className="hidden"
+          onChange={handleImport}
+        />
       </aside>
     </>
   );

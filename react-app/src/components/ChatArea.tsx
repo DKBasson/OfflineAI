@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { MessageBubble } from './MessageBubble';
 import { WelcomeScreen } from './WelcomeScreen';
@@ -16,11 +16,40 @@ export function ChatArea() {
   } = useApp();
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [chatSearch, setChatSearch] = useState('');
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
 
   // Scroll to bottom on new messages/streaming content
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
+
+  // Ctrl+F / Cmd+F to open in-conversation search
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const mod = /Mac/.test(navigator.userAgent) ? e.metaKey : e.ctrlKey;
+      if (mod && e.key === 'f' && messages.length > 0) {
+        e.preventDefault();
+        setChatSearchOpen(true);
+      }
+      if (e.key === 'Escape' && chatSearchOpen) {
+        setChatSearchOpen(false);
+        setChatSearch('');
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [messages.length, chatSearchOpen]);
+
+  // Close search when conversation changes
+  useEffect(() => {
+    setChatSearchOpen(false);
+    setChatSearch('');
+  }, [messages.length === 0]);
+
+  const matchCount = chatSearch
+    ? messages.filter(m => m.content.toLowerCase().includes(chatSearch.toLowerCase())).length
+    : 0;
 
   const showWelcome = messages.length === 0 && !isStreaming;
 
@@ -34,15 +63,44 @@ export function ChatArea() {
         <WelcomeScreen />
       ) : (
         <>
+          {chatSearchOpen && (
+            <div className="sticky top-0 z-10 px-4 py-2 bg-bg/90 backdrop-blur-sm border-b border-border">
+              <div className="flex items-center gap-2 max-w-3xl mx-auto">
+                <input
+                  type="search"
+                  autoFocus
+                  placeholder="Search in conversation…"
+                  value={chatSearch}
+                  onChange={(e) => setChatSearch(e.target.value)}
+                  className="flex-1 bg-surface border border-border rounded-sm px-2.5 py-1.5 text-[13px] text-text-primary outline-none focus:border-border-hi placeholder:text-text-dim"
+                />
+                <span className="text-[11px] text-text-dim">
+                  {chatSearch ? `${matchCount} match${matchCount !== 1 ? 'es' : ''}` : ''}
+                </span>
+                <button
+                  className="text-text-dim hover:text-text-primary text-[13px]"
+                  onClick={() => { setChatSearchOpen(false); setChatSearch(''); }}
+                  aria-label="Close search"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
           {messages.map((msg, idx) => (
-            <MessageBubble
+            <div
               key={idx}
+              className={chatSearch && !msg.content.toLowerCase().includes(chatSearch.toLowerCase()) ? 'opacity-30 transition-opacity' : 'transition-opacity'}
+            >
+              <MessageBubble
               message={msg}
               index={idx}
               isLast={idx === messages.length - 1}
               onImageClick={openLightbox}
               onRegenerate={idx === messages.length - 1 && msg.role === 'assistant' && !isStreaming ? regenerateLastResponse : undefined}
             />
+            </div>
           ))}
 
           {/* Streaming assistant bubble */}
@@ -103,6 +161,34 @@ export function ChatArea() {
 }
 
 function StreamingMessage({ content }: { content: string }) {
+  // Detect if this is progress output (multiple lines with status indicators)
+  const lines = content.split('\n');
+  const isProgress = lines.length > 1 && lines.some(l => l.startsWith('✔') || l.startsWith('📄') || l.startsWith('📋') || l.startsWith('🔍'));
+
+  if (isProgress) {
+    return (
+      <div className="msg-text streaming space-y-1">
+        {lines.map((line, i) => (
+          <div
+            key={i}
+            className={`text-[13px] ${
+              line.startsWith('✔') ? 'text-green-400' :
+              line.startsWith('📄') ? 'text-blue-400' :
+              line.startsWith('📋') ? 'text-purple-400' :
+              line.startsWith('🔍') ? 'text-yellow-400' :
+              'text-text-muted'
+            }`}
+          >
+            {line}
+          </div>
+        ))}
+        <div className="thinking mt-1" aria-label="Working">
+          <span /><span /><span />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="msg-text streaming prose-msg">
       {content}

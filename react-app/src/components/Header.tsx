@@ -17,6 +17,8 @@ export function Header() {
     exportConversation,
     setShortcutsOpen,
     messages,
+    activeProject,
+    openProjectsPanel,
   } = useApp();
 
   const total = tokenStats.input + tokenStats.output;
@@ -38,6 +40,18 @@ export function Header() {
         </svg>
       </button>
 
+      {/* Projects */}
+      <button
+        className="hdr-icon-btn"
+        title="Projects (⌘P)"
+        onClick={openProjectsPanel}
+        aria-label="Open projects"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </svg>
+      </button>
+
       {/* New chat */}
       <button
         className="hdr-icon-btn"
@@ -55,6 +69,18 @@ export function Header() {
 
       {/* Brand */}
       <span className="brand text-[13px] font-semibold text-text-primary tracking-tight select-none">OfflineAI</span>
+
+      {/* Active project badge */}
+      {activeProject && (
+        <button
+          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-accent-lo border border-accent-b text-accent cursor-pointer hover:bg-accent-lo/70 transition-colors"
+          onClick={openProjectsPanel}
+          title={`Project: ${activeProject.name}`}
+        >
+          <span>📂</span>
+          <span className="max-w-[120px] truncate">{activeProject.name}</span>
+        </button>
+      )}
 
       {/* Model selector */}
       <select

@@ -43,6 +43,8 @@ export function normalizeSettings(settings: Partial<Settings> = {}): Settings {
     imagePerfProfile: Object.prototype.hasOwnProperty.call(IMAGE_PERF_PRESETS, s.imagePerfProfile)
       ? s.imagePerfProfile
       : DEFAULT_SETTINGS.imagePerfProfile,
+    webSearch: s.webSearch === true,
+    imageGeneration: s.imageGeneration === true,
   };
 }
 

@@ -24,6 +24,7 @@ export function MessageInput() {
     currentSystemPromptId,
     setSystemPromptById,
     savedPromptsVersion,
+    activeProject,
   } = useApp();
 
   const [text, setText] = useState('');
@@ -191,7 +192,7 @@ export function MessageInput() {
             ref={textareaRef}
             id="input"
             className="flex-1 bg-transparent border-none outline-none text-text-primary text-[14px] resize-none leading-relaxed placeholder:text-text-dim min-h-[36px] max-h-[180px] overflow-y-auto"
-            placeholder="Message…"
+            placeholder={activeProject ? `Message… (try /research, /document, /code, /data)` : 'Message…'}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
