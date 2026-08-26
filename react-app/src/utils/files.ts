@@ -222,3 +222,39 @@ export function triggerDownload(content: string, filename: string, mime: string)
   a.click();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Parse an exported Markdown conversation back into a title and messages array.
+ * Returns null if the file doesn't contain any parseable messages.
+ */
+export function parseMarkdownConversation(md: string): { title: string; messages: Array<{ role: 'user' | 'assistant'; content: string }> } | null {
+  const lines = md.split('\n');
+  const title = lines[0]?.replace(/^#+\s*/, '').trim() || 'Imported';
+
+  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  let currentRole: 'user' | 'assistant' | null = null;
+  let currentContent: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith('**You:**')) {
+      if (currentRole && currentContent.length) {
+        messages.push({ role: currentRole, content: currentContent.join('\n').trim() });
+      }
+      currentRole = 'user';
+      currentContent = [line.replace('**You:**', '').trim()];
+    } else if (line.startsWith('**AI:**')) {
+      if (currentRole && currentContent.length) {
+        messages.push({ role: currentRole, content: currentContent.join('\n').trim() });
+      }
+      currentRole = 'assistant';
+      currentContent = [line.replace('**AI:**', '').trim()];
+    } else if (currentRole) {
+      currentContent.push(line);
+    }
+  }
+  if (currentRole && currentContent.length) {
+    messages.push({ role: currentRole, content: currentContent.join('\n').trim() });
+  }
+
+  return messages.length > 0 ? { title, messages } : null;
+}

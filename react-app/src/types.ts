@@ -5,8 +5,11 @@ export interface Message {
   generatedImage?: string;
   imagePrompt?: string;
   imageModel?: string;
-  intent?: 'image' | 'code' | 'text';
+  intent?: 'image' | 'code' | 'text' | 'search';
   modelUsed?: string;
+  searchResults?: SearchResult[];
+  timestamp?: number;
+  tokens?: number;
 }
 
 export interface PendingImage {
@@ -57,6 +60,14 @@ export interface Settings {
   imagePerfProfile: ImagePerfProfile;
   intentModel: string;
   codeModel: string;
+  webSearch: boolean;
+  imageGeneration: boolean;
+}
+
+export interface SearchResult {
+  title: string;
+  href: string;
+  body: string;
 }
 
 export interface TokenStats {
@@ -90,4 +101,38 @@ export interface ImagePerfConfig {
   width: number;
   height: number;
   steps: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  created: string;
+  sources_count: number;
+  findings_count: number;
+  files_count: number;
+}
+
+export interface ProjectFile {
+  path: string;
+  size: number;
+  modified: string;
+}
+
+export interface ResearchEvent {
+  type: 'status' | 'search' | 'finding' | 'source' | 'done' | 'error';
+  message?: string;
+  query?: string;
+  results_count?: number;
+  text?: string;
+  summary_file?: string;
+  error?: string;
+}
+
+export interface WorkflowStep {
+  id: number;
+  type: 'research' | 'document' | 'code' | 'image' | 'data';
+  description: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  output?: string;
 }

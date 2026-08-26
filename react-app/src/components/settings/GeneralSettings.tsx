@@ -40,7 +40,7 @@ export function GeneralSettings({ form, setField }: GeneralSettingsProps) {
         <div className="settings-card-body">
           <div>
             <label className="settings-label">
-              Context window
+              Message history
               <span className="ml-1.5 font-normal text-text-dim">4 – 100 messages</span>
             </label>
             <input
@@ -54,7 +54,7 @@ export function GeneralSettings({ form, setField }: GeneralSettingsProps) {
               onChange={(e) => setField('contextSize', Number(e.target.value))}
             />
             <p className="text-[11.5px] text-text-dim mt-1">
-              Recent messages sent with each request.
+              Number of recent messages included with each request. Not the same as model token context.
             </p>
           </div>
         </div>
@@ -106,7 +106,7 @@ export function GeneralSettings({ form, setField }: GeneralSettingsProps) {
                 onChange={(e) => setField('maxTokens', Number(e.target.value))}
               />
             </TipField>
-            <TipField label="Context tokens" tip="num_ctx passed to Ollama. Higher = more memory.">
+            <TipField label="Context tokens" tip="num_ctx: total tokens the model can see (input + output). Higher = more memory but slower. 0 = model default (usually 8192). Increase to 16384+ when using web search or project knowledge.">
               <input
                 className="settings-input"
                 type="number"
@@ -140,6 +140,42 @@ export function GeneralSettings({ form, setField }: GeneralSettingsProps) {
               <span className="text-[13px] text-text-muted">Auto-title conversations</span>
               <p className="text-[11.5px] text-text-dim mt-0.5">
                 Generates a short title after the first reply using the active model.
+              </p>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer mt-3">
+            <input
+              id="settings-web-search"
+              type="checkbox"
+              className="mt-0.5 accent-accent shrink-0"
+              checked={form.webSearch}
+              onChange={(e) => setField('webSearch', e.target.checked)}
+            />
+            <div>
+              <span className="text-[13px] text-text-muted">Web search</span>
+              <p className="text-[11.5px] text-text-dim mt-0.5">
+                Let the AI search the internet for up-to-date information. When an intent
+                model is set, search triggers automatically for relevant queries. Without
+                an intent model, every message gets a web search.
+              </p>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer mt-3">
+            <input
+              id="settings-image-generation"
+              type="checkbox"
+              className="mt-0.5 accent-accent shrink-0"
+              checked={form.imageGeneration}
+              onChange={(e) => setField('imageGeneration', e.target.checked)}
+            />
+            <div>
+              <span className="text-[13px] text-text-muted">Image generation</span>
+              <p className="text-[11.5px] text-text-dim mt-0.5">
+                Enable image generation via Ollama. Requires Ollama v0.32.5 or earlier
+                with an image model (e.g. x/z-image-turbo). Disabled by default since
+                Ollama v0.32.6+ removed this feature.
               </p>
             </div>
           </label>

@@ -24,6 +24,8 @@ export const DEFAULT_SETTINGS: Settings = {
   imagePerfProfile: 'eco',
   intentModel: '',
   codeModel: '',
+  webSearch: false,
+  imageGeneration: false,
 };
 
 export const IMAGE_PERF_PRESETS: Record<ImagePerfProfile, ImagePerfConfig> = {
@@ -40,3 +42,49 @@ export const AUDIO_ACCEPT = '.mp3,.wav,.ogg,.opus,.m4a,.webm,.flac,.aac,.wma,.ai
 export const CLIENT_BODY_LIMIT = 45 * 1024 * 1024;
 
 export const DOC_FILE_RE = /\.(docx|odt|ods|odp|pdf)$/i;
+
+export interface ConversationTemplate {
+  id: string;
+  name: string;
+  icon: string;
+  systemPrompt: string;
+  starterMessage: string;
+}
+
+export const CONVERSATION_TEMPLATES: ConversationTemplate[] = [
+  {
+    id: 'code-review',
+    name: 'Code Review',
+    icon: '🔍',
+    systemPrompt: 'You are an expert code reviewer. Analyze code for bugs, performance issues, security vulnerabilities, and style problems. Be specific and suggest fixes.',
+    starterMessage: 'Paste your code and I\'ll review it for bugs, performance, security, and style.',
+  },
+  {
+    id: 'summarize',
+    name: 'Summarize',
+    icon: '📝',
+    systemPrompt: 'You are a summarization expert. Create clear, concise summaries that capture key points. Use bullet points for complex topics.',
+    starterMessage: 'Paste text, a document, or describe what you need summarized.',
+  },
+  {
+    id: 'brainstorm',
+    name: 'Brainstorm',
+    icon: '💡',
+    systemPrompt: 'You are a creative brainstorming partner. Generate diverse, unconventional ideas. Build on concepts, make unexpected connections, and think outside the box. Never dismiss an idea without exploring it first.',
+    starterMessage: 'What would you like to brainstorm about? I\'ll generate creative ideas and unexpected angles.',
+  },
+  {
+    id: 'explain',
+    name: 'Explain Like I\'m 5',
+    icon: '🎓',
+    systemPrompt: 'Explain concepts in the simplest possible terms. Use analogies, examples, and everyday language. Avoid jargon. Build understanding step by step.',
+    starterMessage: 'What concept would you like me to explain simply?',
+  },
+  {
+    id: 'debug',
+    name: 'Debug Helper',
+    icon: '🐛',
+    systemPrompt: 'You are a debugging expert. Help identify the root cause of bugs systematically. Ask clarifying questions, suggest debugging steps, and explain why errors occur.',
+    starterMessage: 'Describe your bug or paste the error message. I\'ll help you find the root cause.',
+  },
+];

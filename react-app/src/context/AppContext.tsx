@@ -11,6 +11,8 @@ import type {
   PendingAudio,
   PendingFile,
   PendingImage,
+  Project,
+  ProjectFile,
   Settings,
   SystemPrompt,
   TokenStats,
@@ -24,6 +26,7 @@ import { useModelsSlice } from './hooks/useModelsSlice';
 import { useHistorySlice } from './hooks/useHistorySlice';
 import { useUISlice } from './hooks/useUISlice';
 import { useStreamingSlice } from './hooks/useStreamingSlice';
+import { useProjectsSlice } from './hooks/useProjectsSlice';
 
 // ── Context types ─────────────────────────────────────
 
@@ -67,6 +70,10 @@ interface AppState {
     access: string;
     storage: string;
   } | null;
+  projects: Project[];
+  activeProject: Project | null;
+  projectFiles: ProjectFile[];
+  isProjectsPanelOpen: boolean;
 }
 
 interface AppActions {
@@ -111,6 +118,14 @@ interface AppActions {
   refreshDownloadedModels: () => Promise<void>;
   updateModelHealth: () => Promise<void>;
   savedPromptsVersion: number;
+  refreshProjects: () => Promise<Project[]>;
+  createNewProject: (name: string, description: string) => Promise<Project | null>;
+  removeProject: (id: string) => Promise<boolean>;
+  openProject: (project: Project) => Promise<void>;
+  closeProject: () => void;
+  refreshProjectFiles: (projectId: string) => Promise<ProjectFile[]>;
+  openProjectsPanel: () => void;
+  closeProjectsPanel: () => void;
 }
 
 type AppContextValue = AppState & AppActions;
@@ -162,6 +177,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [ollamaRestartStatus, setOllamaRestartStatus] = useState('');
   const [modelHealth, setModelHealth] = useState<AppState['modelHealth']>(null);
   const [savedPromptsVersion, setSavedPromptsVersion] = useState(0);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProject, setActiveProject] = useState<Project | null>(null);
+  const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
+  const [isProjectsPanelOpen, setIsProjectsPanelOpen] = useState(false);
 
   // ── Refs ──────────────────────────────────────────────
   const historyDbRef = useRef<IDBDatabase | null>(null);
@@ -251,6 +270,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     activeModel,
     activeContextSize,
     activeUsername,
+    activeProjectId: activeProject?.id ?? null,
     currentSystemPrompt,
     currentSystemPromptId,
     currentConvId,
@@ -269,6 +289,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCurrentConvId,
     saveConversationToHistory: hist.saveConversationToHistory,
     fetchAndSetTokens: ui.fetchAndSetTokens,
+  });
+
+  const projectsSlice = useProjectsSlice({
+    setProjects,
+    setActiveProject,
+    setProjectFiles,
+    setIsProjectsPanelOpen,
   });
 
   // ── Initialization ────────────────────────────────────
@@ -296,6 +323,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     prompts.applyDefaultSystemPrompt();
+
+    projectsSlice.refreshProjects();
 
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -338,6 +367,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ollamaRestartStatus,
     modelHealth,
     savedPromptsVersion,
+    // projects state
+    projects,
+    activeProject,
+    projectFiles,
+    isProjectsPanelOpen,
     // streaming actions
     sendMessage: streaming.sendMessage,
     stopStreaming: streaming.stopStreaming,
@@ -383,6 +417,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setShortcutsOpen: ui.setShortcutsOpen,
     setDragActive: ui.setDragActive,
     resetTokenCounter: ui.resetTokenCounter,
+    // projects actions
+    refreshProjects: projectsSlice.refreshProjects,
+    createNewProject: projectsSlice.createNewProject,
+    removeProject: projectsSlice.removeProject,
+    openProject: projectsSlice.openProject,
+    closeProject: projectsSlice.closeProject,
+    refreshProjectFiles: projectsSlice.refreshProjectFiles,
+    openProjectsPanel: projectsSlice.openProjectsPanel,
+    closeProjectsPanel: projectsSlice.closeProjectsPanel,
   } as AppContextValue;
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
