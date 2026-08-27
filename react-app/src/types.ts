@@ -5,11 +5,12 @@ export interface Message {
   generatedImage?: string;
   imagePrompt?: string;
   imageModel?: string;
-  intent?: 'image' | 'code' | 'text' | 'search';
+  intent?: 'image' | 'code' | 'text' | 'search' | 'research' | 'document';
   modelUsed?: string;
   searchResults?: SearchResult[];
   timestamp?: number;
   tokens?: number;
+  generatedFiles?: string[];
 }
 
 export interface PendingImage {
@@ -135,4 +136,17 @@ export interface WorkflowStep {
   description: string;
   status: 'pending' | 'running' | 'done' | 'error';
   output?: string;
+}
+
+export interface Tool {
+  name: string;
+  description: string;
+  parameters: Record<string, { type: string; description: string; required?: boolean }>;
+  module: string;
+  created: string;
+  usage_count: number;
+  last_used: string | null;
+  enabled: boolean;
+  consecutive_failures?: number;
+  code?: string;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Message, SearchResult } from '../types';
 import { renderMarkdown, highlightCodeBlocks } from '../utils/markdown';
+import { getProjectViewUrl, getProjectDownloadUrl } from '../utils/api';
 import { useApp } from '../context/AppContext';
 
 interface MessageBubbleProps {
@@ -93,12 +94,21 @@ function AssistantBubble({
   onImageClick: (src: string) => void;
   onRegenerate?: () => void;
 }) {
+  const { activeProject } = useApp();
   const bodyRef = useRef<HTMLDivElement>(null);
   const [rendered, setRendered] = useState('');
 
   useEffect(() => {
     if (!message.generatedImage && message.content) {
-      setRendered(renderMarkdown(message.content));
+      let cleanContent = message.content;
+      cleanContent = cleanContent.replace(/<<TOOL:\w+\([^>]*?\)>>/g, '');
+      cleanContent = cleanContent.replace(/<<BUILD_TOOL:.+?>>/g, '');
+      cleanContent = cleanContent.replace(/<｜tool▁calls▁begin｜>[\s\S]*?<｜tool▁calls▁end｜>/g, '');
+      cleanContent = cleanContent.replace(/<｜tool▁outputs▁begin｜>[\s\S]*?<｜tool▁outputs▁end｜>/g, '');
+      cleanContent = cleanContent.replace(/<\|tool_calls?\|>[\s\S]*?(?:<\|\/tool_calls?\|>|$)/g, '');
+      cleanContent = cleanContent.replace(/<\|tool_outputs?\|>[\s\S]*?(?:<\|\/tool_outputs?\|>|$)/g, '');
+      cleanContent = cleanContent.replace(/\n{3,}/g, '\n\n').trim();
+      setRendered(renderMarkdown(cleanContent));
     }
   }, [message.content, message.generatedImage]);
 
@@ -154,6 +164,9 @@ function AssistantBubble({
         )}
         {message.searchResults && message.searchResults.length > 0 && (
           <SearchSources results={message.searchResults} />
+        )}
+        {message.generatedFiles && message.generatedFiles.length > 0 && activeProject && (
+          <GeneratedFiles files={message.generatedFiles} projectId={activeProject.id} />
         )}
         <MessageActions
           content={message.content}
@@ -247,6 +260,48 @@ function SearchSources({ results }: { results: SearchResult[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function GeneratedFiles({ files, projectId }: { files: string[]; projectId: string }) {
+  const unique = [...new Set(files)];
+  const pdfs = unique.filter(f => f.endsWith('.pdf'));
+  const others = unique.filter(f => !f.endsWith('.pdf'));
+
+  if (pdfs.length === 0 && others.length === 0) return null;
+
+  return (
+    <div className="mt-2 border-t border-border/50 pt-2">
+      <div className="text-[11px] text-text-dim mb-1.5">Generated files:</div>
+      <div className="flex flex-wrap gap-1.5">
+        {pdfs.map((f) => (
+          <a
+            key={f}
+            href={getProjectViewUrl(projectId, f)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm text-[11px] font-medium bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors"
+            title={`Open ${f}`}
+          >
+            <span>📕</span>
+            <span>Open PDF</span>
+            <span className="text-[9px] text-red-400/60 max-w-[100px] truncate">{f.split('/').pop()}</span>
+          </a>
+        ))}
+        {others.map((f) => (
+          <a
+            key={f}
+            href={getProjectDownloadUrl(projectId, f)}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm text-[11px] font-medium bg-surface-md border border-border text-text-muted hover:bg-surface-hi transition-colors"
+            title={`Download ${f}`}
+            download
+          >
+            <span>📄</span>
+            <span className="max-w-[120px] truncate">{f.split('/').pop()}</span>
+          </a>
+        ))}
+      </div>
     </div>
   );
 }

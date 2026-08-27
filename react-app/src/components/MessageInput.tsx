@@ -35,7 +35,6 @@ export function MessageInput() {
   const hasPending = pendingImages.length > 0 || pendingFiles.length > 0 || pendingAudio.length > 0;
   const canSend = !isStreaming && (text.trim().length > 0 || hasPending);
 
-  // Update file accept based on model caps  
   useEffect(() => {
     const base = TEXT_ACCEPT + ',' + DOC_ACCEPT + ',' + AUDIO_ACCEPT;
     import('../utils/api').then(({ fetchModelCap }) =>
@@ -45,7 +44,6 @@ export function MessageInput() {
     );
   }, [activeModel]);
 
-  // Auto-resize textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -92,7 +90,6 @@ export function MessageInput() {
     [addFiles],
   );
 
-  // Re-read prompts whenever savedPromptsVersion changes
   const savedPrompts = useMemo(() => loadSystemPrompts(), [savedPromptsVersion]);
 
   return (
@@ -192,7 +189,7 @@ export function MessageInput() {
             ref={textareaRef}
             id="input"
             className="flex-1 bg-transparent border-none outline-none text-text-primary text-[14px] resize-none leading-relaxed placeholder:text-text-dim min-h-[36px] max-h-[180px] overflow-y-auto"
-            placeholder={activeProject ? `Message… (try /research, /document, /code, /data)` : 'Message…'}
+            placeholder={activeProject ? `Message… (try /research, /document, /code, /data, /build)` : 'Message… (try /build to create a tool)'}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}

@@ -34,7 +34,6 @@ function AppInner() {
 
   const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
 
-  // Keyboard shortcuts
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const inInput = ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName);
@@ -79,7 +78,6 @@ function AppInner() {
     closeProjectsPanel,
   ]);
 
-  // Drag-and-drop
   useEffect(() => {
     let dragCount = 0;
 

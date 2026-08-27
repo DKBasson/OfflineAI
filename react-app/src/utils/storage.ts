@@ -10,8 +10,6 @@ import {
   FALLBACK_MODEL,
 } from '../constants';
 
-// ── Settings ─────────────────────────────────────────
-
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
   if (value === '' || value === null || value === undefined) return fallback;
   const n = Number(value);
@@ -62,8 +60,6 @@ export function saveSettings(s: Settings): void {
   } catch { /* ignore */ }
 }
 
-// ── System prompts ────────────────────────────────────
-
 export function loadSystemPrompts(): SystemPrompt[] {
   try {
     return JSON.parse(localStorage.getItem(PROMPTS_KEY) || '[]') as SystemPrompt[];
@@ -77,8 +73,6 @@ export function saveSystemPrompts(prompts: SystemPrompt[]): void {
     localStorage.setItem(PROMPTS_KEY, JSON.stringify(prompts));
   } catch { /* ignore */ }
 }
-
-// ── IndexedDB history ─────────────────────────────────
 
 function readLegacyHistory(): Conversation[] {
   try {

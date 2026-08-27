@@ -27,7 +27,6 @@ export interface UISliceDeps {
   setActiveUsername: React.Dispatch<React.SetStateAction<string>>;
   setActiveContextSize: React.Dispatch<React.SetStateAction<number>>;
   setActiveModelState: React.Dispatch<React.SetStateAction<string>>;
-  // Cross-slice dep
   getModelCap: (model: string) => Promise<{ vision: boolean }>;
 }
 

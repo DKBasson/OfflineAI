@@ -185,8 +185,6 @@ export function GeneralSettings({ form, setField }: GeneralSettingsProps) {
   );
 }
 
-// ── Shared helpers ────────────────────────────────────
-
 function TipField({
   label,
   tip,

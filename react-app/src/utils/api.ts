@@ -1,5 +1,5 @@
 import { AUTH_TOKEN_KEY } from '../constants';
-import type { Project, ProjectFile, ResearchEvent } from '../types';
+import type { Project, ProjectFile, ResearchEvent, Tool } from '../types';
 
 export function getAuthToken(): string | null {
   return sessionStorage.getItem(AUTH_TOKEN_KEY);
@@ -17,8 +17,6 @@ export function authHeaders(extra: Record<string, string> = {}): Record<string, 
   const token = getAuthToken();
   return token ? { ...extra, 'X-OfflineAI-Token': token } : extra;
 }
-
-// ── API calls ────────────────────────────────────────
 
 export async function fetchModels(signal?: AbortSignal): Promise<string[]> {
   try {
@@ -162,39 +160,39 @@ export async function* streamChat(
   }
 }
 
-// ── Intent classification ─────────────────────────────
-// Sends a fast single-token request to a small model to determine whether the
-// user's message is an image request, a code request, or plain text.
-// Returns 'image' | 'code' | 'text'.  Never throws — falls back to 'text'.
 export async function classifyIntent(
   text: string,
   model: string,
   signal: AbortSignal,
-): Promise<'image' | 'code' | 'text' | 'search'> {
-  console.log('[intent] classifyIntent called', { model, text: text.slice(0, 100) });
+): Promise<'image' | 'code' | 'text' | 'search' | 'research' | 'document'> {
   try {
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         model,
-        think: false, // disable chain-of-thought for thinking models (e.g. Qwen3)
+        think: false,
         messages: [
           {
             role: 'system',
             content:
-              'Classify the user message. Reply with exactly one word: image, code, search, or text.\n' +
+              'Classify the user message. Reply with exactly one word: image, code, search, research, document, or text.\n' +
               'image = requests to generate, draw, or create pictures/artwork/photos\n' +
               'code = any programming task: write, generate, fix, debug, explain, implement code/functions/scripts/algorithms\n' +
-              'search = questions about current events, recent news, real-time data, live prices, weather, sports scores, or anything that requires up-to-date internet information\n' +
-              'text = everything else: questions answerable from general knowledge, chat, analysis, summaries\n\n' +
+              'search = simple questions about current events, recent news, real-time data, live prices, weather, sports scores\n' +
+              'research = deep research requests: investigate, analyze, compare, study, explore a topic in depth, find out everything about something\n' +
+              'document = requests to write a report, essay, article, summary document, whitepaper, guide, tutorial, or analysis document\n' +
+              'text = everything else: general questions, chat, quick explanations, casual conversation\n\n' +
               'Examples:\n' +
               '"draw a cat" → image\n' +
               '"generate javascript for fibonacci" → code\n' +
-              '"what is the latest news about AI?" → search\n' +
-              '"what is the current bitcoin price?" → search\n' +
-              '"who won the game last night?" → search\n' +
-              '"what is the weather in Tokyo?" → search\n' +
+              '"what is the bitcoin price right now?" → search\n' +
+              '"research the history of quantum computing" → research\n' +
+              '"investigate the latest AI safety developments" → research\n' +
+              '"compare React vs Vue in depth" → research\n' +
+              '"write a report on climate change" → document\n' +
+              '"create a guide on Python best practices" → document\n' +
+              '"write an analysis of the EV market" → document\n' +
               '"what is the capital of France?" → text\n' +
               '"explain how black holes work" → text\n' +
               '"create a landscape painting" → image\n\n' +
@@ -207,17 +205,14 @@ export async function classifyIntent(
       }),
       signal,
     });
-    console.log('[intent] HTTP status:', resp.status, resp.ok);
     const raw = await resp.text();
-    console.log('[intent] raw response:', raw.slice(0, 500));
     const d = JSON.parse(raw.trim().split('\n')[0]);
-    console.log('[intent] parsed:', d);
-    // thinking models (e.g. Qwen3) may return content:"" with the actual text in thinking
     const word = (d?.message?.content || d?.message?.thinking || d?.error || '').toLowerCase().trim().split(/\s+/)[0];
-    console.log('[intent] extracted word:', JSON.stringify(word));
     if (word === 'image') return 'image';
     if (word === 'code') return 'code';
     if (word === 'search') return 'search';
+    if (word === 'research') return 'research';
+    if (word === 'document') return 'document';
     return 'text';
   } catch (err) {
     console.warn('[intent] classifyIntent error — falling back to text', err);
@@ -283,8 +278,6 @@ export async function* streamImageGeneration(
   const reader = resp.body!.getReader();
   const dec = new TextDecoder();
   let buf = '';
-  // Ollama streams image data across many NDJSON lines, each with a partial
-  // base64 string in the `response` field. Accumulate until `done: true`.
   let accumulatedResponse = '';
 
   while (true) {
@@ -299,25 +292,20 @@ export async function* streamImageGeneration(
         const d = JSON.parse(line);
         if (d.error) { yield { error: d.error }; return; }
 
-        // Track diffusion step progress
         if (d.total && d.completed != null) {
           yield { progress: Math.min(99, Math.round((d.completed / d.total) * 100)) };
         }
 
-        // Accumulate the response field (base64 image data comes in chunks)
         if (typeof d.response === 'string' && d.response) {
           accumulatedResponse += d.response;
         }
 
-        // Check for explicit `image` or `images` fields (some models may use these)
         const directImage = extractImagePayload(d);
         if (directImage) { yield { image: directImage, progress: 100 }; return; }
 
-        // When done, the accumulated response IS the base64 image
         if (d.done) {
           if (accumulatedResponse) {
             const cleaned = accumulatedResponse.replace(/\s+/g, '');
-            // Verify it looks like base64 data
             if (cleaned.length > 100 && /^[A-Za-z0-9+/=]+$/.test(cleaned)) {
               yield { image: cleaned, progress: 100 };
               return;
@@ -328,7 +316,6 @@ export async function* streamImageGeneration(
     }
   }
 
-  // If we exit the loop without finding an image, check what we accumulated
   if (accumulatedResponse) {
     const cleaned = accumulatedResponse.replace(/\s+/g, '');
     if (cleaned.length > 100 && /^[A-Za-z0-9+/=]+$/.test(cleaned)) {
@@ -339,7 +326,6 @@ export async function* streamImageGeneration(
 }
 
 function extractImagePayload(payload: Record<string, unknown>): string | null {
-  // Check explicit image fields (not the streaming `response` field — that's handled by accumulation)
   const raw =
     (payload.image as string | undefined) ||
     (Array.isArray(payload.images) ? (payload.images[0] as string) : null) ||
@@ -423,8 +409,6 @@ export async function* transcribeAudio(
     }
   }
 }
-
-// ── Projects API ─────────────────────────────────────
 
 export async function fetchProjects(): Promise<Project[]> {
   try {
@@ -531,6 +515,12 @@ export function getProjectDownloadUrl(projectId: string, filePath: string): stri
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
 
+export function getProjectViewUrl(projectId: string, filePath: string): string {
+  const token = getAuthToken();
+  const base = `/api/projects/${encodeURIComponent(projectId)}/view/${filePath}`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
 export async function* streamResearch(
   projectId: string,
   topic: string,
@@ -570,5 +560,56 @@ export async function* streamResearch(
         if (evt.type === 'done' || evt.type === 'error') return;
       } catch { /* ignore */ }
     }
+  }
+}
+
+export async function fetchTools(): Promise<Tool[]> {
+  try {
+    const r = await fetch('/api/tools', { headers: authHeaders() });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return (data as { tools: Tool[] }).tools || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteTool(name: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/tools/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function toggleTool(name: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/tools/${encodeURIComponent(name)}/toggle`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function buildToolApi(
+  description: string,
+  model: string,
+): Promise<{ ok: boolean; name?: string; error?: string }> {
+  try {
+    const r = await fetch('/api/tools/build', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ description, model }),
+    });
+    return r.json();
+  } catch {
+    return { ok: false, error: 'Request failed' };
   }
 }

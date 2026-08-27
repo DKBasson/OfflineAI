@@ -17,6 +17,13 @@ from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("offlineai")
 
 try:
     from ddgs import DDGS as _DDGS
@@ -66,6 +73,12 @@ try:
 except ImportError:
     _MARKDOWN_AVAILABLE = False
 
+try:
+    import weasyprint as _weasyprint
+    _WEASYPRINT_AVAILABLE = True
+except ImportError:
+    _WEASYPRINT_AVAILABLE = False
+
 _WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL", "tiny")
 _whisper_model: object = None
 _whisper_lock = asyncio.Lock()
@@ -101,8 +114,6 @@ IMAGE_GEN_DEFAULT_HEIGHT = int(os.environ.get("OFFLINEAI_IMAGE_DEFAULT_HEIGHT", 
 IMAGE_GEN_DEFAULT_STEPS = int(os.environ.get("OFFLINEAI_IMAGE_DEFAULT_STEPS", "6"))
 
 _TOKEN_STATS_FILE = Path(__file__).parent / "token_stats.json"
-# Maximum number of distinct user entries kept in token_stats.json.
-# When exceeded, entries with the lowest total token count are pruned first.
 _MAX_TOKEN_STATS_ENTRIES = int(os.environ.get("OFFLINEAI_MAX_TOKEN_ENTRIES", "500"))
 
 def _load_token_stats() -> dict:
@@ -118,7 +129,6 @@ def _load_token_stats() -> dict:
 
 def _save_token_stats() -> None:
     global _token_stats
-    # Prune to prevent unbounded growth: keep entries with the highest total tokens.
     if len(_token_stats) > _MAX_TOKEN_STATS_ENTRIES:
         _token_stats = dict(
             sorted(
@@ -157,6 +167,7 @@ async def require_lan_token(request: Request, call_next):
     if AUTH_REQUIRED and not is_loopback and request.url.path.startswith("/api/"):
         supplied = request.headers.get("x-offlineai-token") or request.query_params.get("token")
         if supplied != AUTH_TOKEN:
+            log.warning("Auth rejected for %s on %s", client_host, request.url.path)
             return JSONResponse({"error": "Authentication required"}, status_code=401)
     return await call_next(request)
 
@@ -169,6 +180,7 @@ async def limit_body_size(request: Request, call_next):
     except ValueError:
         return JSONResponse({"error": "Invalid Content-Length header"}, status_code=400)
     if body_size > MAX_BODY:
+        log.warning("Request too large: %s bytes", body_size)
         return JSONResponse({"error": "Request body too large (max 50 MB)"}, status_code=413)
     return await call_next(request)
 
@@ -372,7 +384,6 @@ async def transcribe_audio(file: UploadFile = File(...)):
         tmp.write(content)
         tmp_path = tmp.name
 
-    # Load (or reuse) the model before spawning the worker thread.
     model = await _get_whisper()
 
     async def event_stream():
@@ -536,11 +547,6 @@ def _apply_image_generation_caps(body: dict) -> dict:
     return capped
 
 
-# ---------------------------------------------------------------------------
-# Research Agent helpers
-# ---------------------------------------------------------------------------
-
-
 def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
@@ -566,7 +572,6 @@ Rules:
             data = resp.json()
             content = data.get("message", {}).get("content", "")
             queries = [q.strip().strip('"').strip("'") for q in content.strip().split("\n") if q.strip()]
-            # Remove any numbered prefixes like "1." or "- "
             queries = [re.sub(r'^[\d]+[.)\s]+|^[-*]\s+', '', q).strip() for q in queries]
             return queries[:num_queries] if queries else [topic]
     except Exception:
@@ -610,8 +615,7 @@ async def _extract_findings(topic: str, page_contents: list[str], model: str) ->
     if not page_contents:
         return "No source content available to analyze."
 
-    combined = "\n\n---\n\n".join(page_contents[:10])  # Limit to 10 sources
-    # Truncate to fit in context
+    combined = "\n\n---\n\n".join(page_contents[:10])
     combined = combined[:24000]
 
     prompt = f"""Analyze the following source material about "{topic}" and extract the key findings.
@@ -669,6 +673,38 @@ Be thorough, factual, and cite sources where relevant."""
         return f"# Research Summary: {topic}\n\nError generating summary: {exc}\n\n## Findings\n\n{findings}"
 
 
+def _save_markdown_as_pdf(md_content: str, pdf_path: Path, title: str = "") -> None:
+    """Convert Markdown content to a human-readable PDF and save to disk."""
+    if not _WEASYPRINT_AVAILABLE or not _MARKDOWN_AVAILABLE:
+        return
+    html_body = _markdown_lib.markdown(md_content, extensions=["tables", "fenced_code", "toc", "nl2br"])
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{title}</title>
+<style>
+@page {{ size: A4; margin: 2.5cm; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 11pt; line-height: 1.7; color: #1a1a1a; }}
+h1 {{ font-size: 22pt; border-bottom: 2px solid #333; padding-bottom: 8px; margin-top: 0; margin-bottom: 16px; }}
+h2 {{ font-size: 16pt; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 28px; color: #2c3e50; }}
+h3 {{ font-size: 13pt; margin-top: 20px; color: #34495e; }}
+p {{ margin: 8px 0; text-align: justify; }}
+ul, ol {{ margin: 8px 0; padding-left: 24px; }}
+li {{ margin: 4px 0; }}
+code {{ background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-size: 0.88em; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; }}
+pre {{ background: #f8f8f8; padding: 14px 18px; border-radius: 6px; overflow-x: auto; border: 1px solid #e8e8e8; font-size: 0.85em; line-height: 1.5; }}
+pre code {{ background: none; padding: 0; }}
+table {{ border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 0.92em; }}
+th, td {{ border: 1px solid #ddd; padding: 8px 12px; text-align: left; }}
+th {{ background: #f0f0f0; font-weight: 600; }}
+tr:nth-child(even) {{ background: #fafafa; }}
+blockquote {{ border-left: 4px solid #3498db; margin: 14px 0; padding: 10px 18px; color: #555; background: #f9fbfd; border-radius: 0 4px 4px 0; }}
+a {{ color: #2980b9; text-decoration: none; }}
+hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
+</style></head><body>{html_body}</body></html>"""
+    doc = _weasyprint.HTML(string=html)
+    doc.write_pdf(str(pdf_path))
+    log.info("PDF saved: %s", pdf_path.name)
+
+
 def _get_project_knowledge_context(project_id: str, max_chars: int = 8000) -> str:
     """Load project knowledge and format as context for the LLM."""
     try:
@@ -690,13 +726,13 @@ def _get_project_knowledge_context(project_id: str, max_chars: int = 8000) -> st
 
         if findings:
             parts.append("Key Findings:")
-            for i, f in enumerate(findings[-10:], 1):  # Last 10 findings
+            for i, f in enumerate(findings[-10:], 1):
                 parts.append(f"{i}. [{f.get('topic', 'Unknown')}] {f.get('summary', '')[:300]}")
             parts.append("")
 
         if sources:
             parts.append("Available Sources:")
-            for s in sources[-15:]:  # Last 15 sources
+            for s in sources[-15:]:
                 parts.append(f"- {s.get('title', 'Unknown')}: {s.get('url', '')}")
 
         parts.append("---")
@@ -705,6 +741,420 @@ def _get_project_knowledge_context(project_id: str, max_chars: int = 8000) -> st
         return context[:max_chars]
     except Exception:
         return ""
+
+
+_tool_registry_cache: list[dict] | None = None
+_tool_registry_mtime: float = 0
+
+
+def _load_tool_registry() -> list[dict]:
+    global _tool_registry_cache, _tool_registry_mtime
+    try:
+        mtime = _REGISTRY_FILE.stat().st_mtime if _REGISTRY_FILE.exists() else 0
+        if _tool_registry_cache is not None and mtime == _tool_registry_mtime:
+            return _tool_registry_cache
+        data = json.loads(_REGISTRY_FILE.read_text(encoding="utf-8"))
+        _tool_registry_cache = data
+        _tool_registry_mtime = mtime
+        return data
+    except Exception:
+        return []
+
+
+def _save_tool_registry(registry: list[dict]) -> None:
+    global _tool_registry_cache, _tool_registry_mtime
+    _REGISTRY_FILE.write_text(json.dumps(registry, indent=2, ensure_ascii=False), encoding="utf-8")
+    _tool_registry_cache = registry
+    _tool_registry_mtime = _REGISTRY_FILE.stat().st_mtime
+
+def _validate_tool_code(code: str) -> tuple[bool, str]:
+    """Check tool code for blocked patterns."""
+    for pattern in _TOOL_BLOCKED_PATTERNS:
+        if pattern in code:
+            return False, f"Blocked pattern found: {pattern}"
+    return True, ""
+
+def _execute_tool(tool_name: str, params: dict, timeout: float = 10.0) -> dict:
+    """Load and execute a tool by name with given parameters."""
+    import importlib.util
+    import concurrent.futures
+
+    registry = _load_tool_registry()
+    tool_entry = next((t for t in registry if t["name"] == tool_name and t.get("enabled", True)), None)
+    if not tool_entry:
+        return {"error": f"Tool '{tool_name}' not found or disabled"}
+
+    module_path = PLUGINS_DIR / tool_entry["module"]
+    if not module_path.exists():
+        return {"error": f"Tool module not found: {tool_entry['module']}"}
+
+    expected_params = tool_entry.get("parameters", {})
+    for param_name, param_spec in expected_params.items():
+        if param_spec.get("required") and param_name not in params:
+            return {"error": f"Missing required parameter: {param_name}"}
+
+    try:
+        spec = importlib.util.spec_from_file_location(f"tool_{tool_name}_{time.time()}", str(module_path))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        if not hasattr(module, "run"):
+            return {"error": f"Tool '{tool_name}' has no run() function"}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(module.run, **params)
+            result = future.result(timeout=timeout)
+
+        for t in registry:
+            if t["name"] == tool_name:
+                t["usage_count"] = t.get("usage_count", 0) + 1
+                t["last_used"] = datetime.now(timezone.utc).isoformat()
+                t["consecutive_failures"] = 0
+                break
+        _save_tool_registry(registry)
+        _log_tool_run(tool_name, params, result, None)
+        log.info("Tool %s executed successfully", tool_name)
+        return {"result": result}
+
+    except concurrent.futures.TimeoutError:
+        _increment_tool_failure(tool_name)
+        _log_tool_run(tool_name, params, None, "Timeout")
+        log.warning("Tool %s timed out after %ss", tool_name, timeout)
+        return {"error": f"Tool '{tool_name}' timed out after {timeout}s"}
+    except Exception as exc:
+        _increment_tool_failure(tool_name)
+        _log_tool_run(tool_name, params, None, str(exc))
+        log.warning("Tool %s failed: %s", tool_name, exc)
+        return {"error": f"Tool execution failed: {exc}"}
+
+def _increment_tool_failure(tool_name: str) -> None:
+    """Increment failure counter; auto-disable after 3 consecutive failures."""
+    registry = _load_tool_registry()
+    for t in registry:
+        if t["name"] == tool_name:
+            fails = t.get("consecutive_failures", 0) + 1
+            t["consecutive_failures"] = fails
+            if fails >= 3:
+                t["enabled"] = False
+                log.warning("Tool %s auto-disabled after %d consecutive failures", tool_name, fails)
+            break
+    _save_tool_registry(registry)
+
+def _log_tool_run(name: str, params: dict, result, error: str | None) -> None:
+    log_file = PLUGINS_DIR / "logs" / "tool_runs.json"
+    try:
+        logs = json.loads(log_file.read_text(encoding="utf-8")) if log_file.exists() else []
+    except Exception:
+        logs = []
+    logs.append({
+        "tool": name,
+        "params": {k: str(v)[:100] for k, v in params.items()},
+        "result": str(result)[:500] if result else None,
+        "error": error,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    logs = logs[-200:]
+    try:
+        log_file.write_text(json.dumps(logs, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+def _get_tools_summary() -> str:
+    """Format available tools as a string for the system prompt."""
+    registry = _load_tool_registry()
+    enabled = [t for t in registry if t.get("enabled", True)]
+    lines = []
+    lines.append("--- AVAILABLE TOOLS ---")
+    lines.append("CRITICAL: You have a tool execution system. To call a tool, you MUST use this EXACT syntax:")
+    lines.append("<<TOOL:tool_name(param1=value1, param2=value2)>>")
+    lines.append("")
+    lines.append("RULES:")
+    lines.append("- Use ONLY the <<TOOL:...>> syntax. Do NOT use any other tool-calling format.")
+    lines.append("- Do NOT use function calling, <|tool_calls|>, or any model-native tool syntax.")
+    lines.append("- Do NOT hallucinate or make up data. If you need real data, use a tool.")
+    lines.append("- The system will execute the tool and return real results to you.")
+    lines.append("")
+    if enabled:
+        lines.append("Available tools:")
+        for t in enabled:
+            params_str = ", ".join(
+                f"{k}={v.get('type', 'string')}" + (" REQUIRED" if v.get("required") else "")
+                for k, v in (t.get("parameters") or {}).items()
+            )
+            lines.append(f"  • {t['name']}({params_str}) — {t.get('description', '')}")
+        lines.append("")
+        lines.append("Example: <<TOOL:weather(city=London)>>")
+    else:
+        lines.append("No tools are currently installed.")
+    lines.append("")
+    lines.append("If you need external data and no tool above covers it, respond with:")
+    lines.append("<<BUILD_TOOL:description of what capability you need>>")
+    lines.append("The system will automatically research, build, and register a new tool.")
+    lines.append("---")
+    return "\n".join(lines)
+
+_TOOL_CALL_RE = re.compile(r'<<TOOL:(\w+)\(([^>]*?)\)>>')
+_BUILD_TOOL_RE = re.compile(r'<<BUILD_TOOL:(.+?)>>')
+_ALL_TOOL_TAGS_RE = re.compile(r'<<(?:TOOL:\w+\([^>]*?\)|BUILD_TOOL:.+?)>>')
+
+
+def _parse_tool_calls(text: str) -> list[tuple[str, dict]]:
+    """Parse <<TOOL:name(key=value, key2=value2)>> patterns. Handles quoted values with commas."""
+    calls = []
+    for match in _TOOL_CALL_RE.finditer(text):
+        name = match.group(1)
+        params_str = match.group(2).strip()
+        params = {}
+        if params_str:
+            parts = re.split(r',\s*(?=\w+=)', params_str)
+            for part in parts:
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    params[k.strip()] = v.strip().strip("'\"")
+        calls.append((name, params))
+    return calls
+
+
+def _strip_tags_for_display(text: str) -> str:
+    """Remove <<TOOL:...>>, <<BUILD_TOOL:...>> tags, and native model tool syntax from text."""
+    cleaned = _strip_native_tool_syntax(text)
+    cleaned = _ALL_TOOL_TAGS_RE.sub('', cleaned)
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
+    return cleaned
+
+
+_NATIVE_TOOL_PATTERNS = [
+    re.compile(r'<｜tool▁calls▁begin｜>.*?<｜tool▁calls▁end｜>', re.DOTALL),
+    re.compile(r'<｜tool▁outputs▁begin｜>.*?<｜tool▁outputs▁end｜>', re.DOTALL),
+    re.compile(r'<\|tool_calls?\|>.*?(?:<\|/tool_calls?\|>|$)', re.DOTALL),
+    re.compile(r'<\|tool_outputs?\|>.*?(?:<\|/tool_outputs?\|>|$)', re.DOTALL),
+    re.compile(r'<tool_call>.*?</tool_call>', re.DOTALL),
+    re.compile(r'<function_call>.*?</function_call>', re.DOTALL),
+    re.compile(r'```tool_code.*?```', re.DOTALL),
+]
+
+
+def _strip_native_tool_syntax(text: str) -> str:
+    """Remove native model tool-calling markup from response text."""
+    cleaned = text
+    for pattern in _NATIVE_TOOL_PATTERNS:
+        cleaned = pattern.sub('', cleaned)
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
+    return cleaned
+
+
+def _pre_match_tools(user_message: str) -> list[tuple[str, dict]]:
+    """Match the user's message against installed tools using keyword analysis.
+    
+    Returns a list of (tool_name, params) to execute BEFORE sending to the LLM.
+    This is the fast path — no LLM call needed, works with any model.
+    """
+    if not user_message:
+        return []
+    
+    registry = _load_tool_registry()
+    enabled = [t for t in registry if t.get("enabled", True)]
+    if not enabled:
+        return []
+    
+    msg = user_message.lower().strip()
+    matches = []
+    
+    for tool in enabled:
+        name = tool["name"]
+        desc = (tool.get("description") or "").lower()
+        params = tool.get("parameters", {})
+        
+        name_words = set(name.replace("_", " ").split())
+        desc_words = set(re.findall(r'\b[a-z]{3,}\b', desc))
+        tool_keywords = name_words | desc_words
+        tool_keywords -= {"get", "current", "any", "for", "the", "and", "from", "with", "using", "conditions"}
+        
+        msg_words = set(re.findall(r'\b[a-z]{3,}\b', msg))
+        overlap = tool_keywords & msg_words
+        
+        if not overlap:
+            continue
+        
+        extracted_params = {}
+        for param_name, param_spec in params.items():
+            param_desc = (param_spec.get("description") or "").lower()
+            
+            if "city" in param_name.lower() or "city" in param_desc or "location" in param_name.lower():
+                city_patterns = [
+                    r'\b(?:in|for|at|of)\s+([A-Z][a-zA-Z\s]+?)(?:\s+(?:today|now|right now|currently|tonight|tomorrow))?\s*[?.!,]?\s*$',
+                    r'\b(?:in|for|at|of)\s+([A-Z][a-zA-Z\s]+?)(?:\s*[?.!,]|$)',
+                    r'\b(?:weather|temperature|forecast|climate)\s+(?:in\s+|for\s+|at\s+)?([A-Z][a-zA-Z\s]+?)(?:\s*[?.!,]|$)',
+                    r'([A-Z][a-zA-Z\s]+?)\s+(?:weather|temperature|forecast|climate)',
+                ]
+                for pattern in city_patterns:
+                    match = re.search(pattern, user_message)
+                    if match:
+                        extracted_params[param_name] = match.group(1).strip()
+                        break
+            
+            elif "currency" in param_name.lower() or "currency" in param_desc:
+                cur_match = re.search(r'\b([A-Z]{3})\b', user_message)
+                if cur_match:
+                    extracted_params[param_name] = cur_match.group(1)
+            
+            elif "symbol" in param_name.lower() or "ticker" in param_name.lower():
+                ticker_match = re.search(r'\b([A-Z]{1,5})\b', user_message)
+                if ticker_match:
+                    extracted_params[param_name] = ticker_match.group(1)
+            
+            elif param_spec.get("type") == "number":
+                num_match = re.search(r'\b(\d+(?:\.\d+)?)\b', user_message)
+                if num_match:
+                    extracted_params[param_name] = num_match.group(1)
+        
+        required_params = {k for k, v in params.items() if v.get("required")}
+        if required_params and not required_params.issubset(extracted_params.keys()):
+            continue
+        
+        if len(overlap) >= 1:
+            matches.append((name, extracted_params))
+    
+    return matches
+
+
+async def _build_tool(description: str, model: str) -> dict:
+    """Autonomously research, build, test, and register a new tool."""
+    log.info("Building tool: %s", description)
+    queries = await _generate_search_queries(f"free API no key required for: {description}", 3, model)
+    api_info = []
+    for q in queries:
+        results = await _do_web_search(q, max_results=3)
+        for r in results[:2]:
+            page = await _fetch_page_content(r.get("href", ""), max_chars=3000)
+            if page:
+                api_info.append(page)
+
+    combined_research = "\n\n---\n\n".join(api_info[:5])[:15000]
+
+    tool_prompt = f"""Write a Python tool module for: "{description}"
+
+Research findings about available APIs:
+{combined_research}
+
+The module MUST follow this EXACT format:
+TOOL_NAME = "short_name"  # lowercase, underscores, GENERIC name (e.g. "weather" not "weather_london")
+TOOL_DESCRIPTION = "What this tool does in one sentence"
+TOOL_PARAMETERS = {{
+    "param_name": {{"type": "string", "description": "What this param is", "required": True}}
+}}
+
+def run(**kwargs) -> dict:
+    import httpx
+    # implementation
+    return {{"key": "value"}}
+
+CRITICAL RULES:
+- The tool MUST be GENERIC, not specific to one city/item/thing. Use parameters for the variable parts.
+- TOOL_NAME must be short and generic: "weather", "stock_price", "currency", NOT "weather_cape_town"
+- Use ONLY free APIs that require NO API keys. Strongly prefer: Open-Meteo (weather), exchangerate.host (currency), etc.
+- Do NOT use any API that needs a key, token, or registration. If you put "YOUR_API_KEY" anywhere, the tool is BROKEN.
+- Only import from: httpx, json, datetime, re, math, urllib, html, csv, collections, time, calendar, decimal, statistics, base64, hashlib
+- The run() function MUST accept **kwargs and return a dict
+- Handle errors gracefully with try/except, return {{"error": "message"}} on failure
+- Do NOT use os, subprocess, eval, exec, open(), pathlib, shutil, glob
+- Keep it simple and focused on one task
+
+For weather specifically, use Open-Meteo API:
+  https://api.open-meteo.com/v1/forecast?latitude=XX&longitude=YY&current=temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code
+  Use https://geocoding-api.open-meteo.com/v1/search?name=CITY&count=1 to get lat/lon from city name.
+
+Return ONLY the Python code, no markdown fences, no explanations."""
+
+    fix_prompt = tool_prompt
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(f"{OLLAMA}/api/chat", json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": fix_prompt}],
+                    "stream": False,
+                    "options": {"temperature": 0.2, "num_predict": 4096, "num_ctx": 32768},
+                })
+                data = resp.json()
+                code = data.get("message", {}).get("content", "")
+
+            code = code.strip()
+            if code.startswith("```"):
+                lines = code.split("\n")
+                if lines[-1].strip() == "```":
+                    lines = lines[1:-1]
+                else:
+                    lines = lines[1:]
+                code = "\n".join(lines)
+
+            valid, error = _validate_tool_code(code)
+            if not valid:
+                fix_prompt = f"The previous code had a security issue: {error}. Rewrite the entire tool module without using blocked patterns. Return only Python code."
+                continue
+
+            import importlib.util
+            temp_path = PLUGINS_DIR / "tools" / "_temp_build.py"
+            temp_path.write_text(code, encoding="utf-8")
+
+            spec = importlib.util.spec_from_file_location(f"_temp_build_{time.time()}", str(temp_path))
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            tool_name = getattr(module, "TOOL_NAME", None)
+            tool_desc = getattr(module, "TOOL_DESCRIPTION", None)
+            tool_params = getattr(module, "TOOL_PARAMETERS", {})
+            run_fn = getattr(module, "run", None)
+
+            if not tool_name or not run_fn:
+                fix_prompt = f"The module is missing TOOL_NAME or run(). Rewrite the complete module. Return only Python code."
+                temp_path.unlink(missing_ok=True)
+                continue
+
+            try:
+                import concurrent.futures
+                test_params = {}
+                for k, v in tool_params.items():
+                    if v.get("type") == "number":
+                        test_params[k] = 0
+                    else:
+                        test_params[k] = "London" if "city" in k.lower() else "test"
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(run_fn, **test_params)
+                    test_result = future.result(timeout=10.0)
+            except Exception as test_err:
+                fix_prompt = f"The tool threw an error during testing with params {test_params}: {test_err}. Fix the run() function. Return only Python code."
+                temp_path.unlink(missing_ok=True)
+                continue
+
+            final_path = PLUGINS_DIR / "tools" / f"{tool_name}.py"
+            temp_path.rename(final_path)
+
+            registry = _load_tool_registry()
+            registry = [t for t in registry if t["name"] != tool_name]
+            registry.append({
+                "name": tool_name,
+                "description": tool_desc or description,
+                "parameters": tool_params,
+                "module": f"tools/{tool_name}.py",
+                "created": datetime.now(timezone.utc).isoformat(),
+                "usage_count": 0,
+                "last_used": None,
+                "enabled": True,
+                "consecutive_failures": 0,
+            })
+            _save_tool_registry(registry)
+            log.info("Tool %s built successfully", tool_name)
+            return {"ok": True, "name": tool_name, "description": tool_desc}
+
+        except Exception as exc:
+            fix_prompt = f"Failed to load the module: {exc}. Rewrite the complete tool module. Return only Python code."
+            temp_path = PLUGINS_DIR / "tools" / "_temp_build.py"
+            temp_path.unlink(missing_ok=True)
+            continue
+
+    log.warning("Tool build failed after 3 attempts: %s", description)
+    return {"ok": False, "error": "Failed to build tool after 3 attempts"}
 
 
 async def stream_ollama_response(path: str, body: dict, *, write_timeout: float):
@@ -763,13 +1213,13 @@ def _token_table_lines(active: str | None, prompt_req: int, completion_req: int)
 
 
 def _print_token_table(display_name: str, prompt_req: int, completion_req: int) -> None:
-    print("\n" + "\n".join(_token_table_lines(display_name, prompt_req, completion_req)))
+    log.info("\n" + "\n".join(_token_table_lines(display_name, prompt_req, completion_req)))
 
 
 def _print_shutdown_summary() -> None:
     if not _token_stats:
         return
-    print("\n" + "\n".join(_token_table_lines(None, 0, 0)))
+    log.info("\n" + "\n".join(_token_table_lines(None, 0, 0)))
 
 
 atexit.register(_print_shutdown_summary)
@@ -807,22 +1257,122 @@ async def _chat_stream_with_token_log(body: dict, client_host: str):
         _tally_done_line(buf, display_name)
 
 
+async def _chat_with_tool_execution(body: dict, client_host: str):
+    """Wrap chat streaming with automatic tool execution and tool building.
+    
+    Flow:
+    1. Buffer the model's full response (don't stream raw tool tags to client)
+    2. Strip native tool syntax and display clean text
+    3. If <<BUILD_TOOL:...>> found: build the tool, then re-run
+    4. If <<TOOL:...>> found: execute tools, send results back to model, stream final answer
+    5. If neither: just stream the clean response
+    """
+    full_response = ""
+
+    async for chunk in _chat_stream_with_token_log(body, client_host):
+        for line in chunk.decode("utf-8", errors="replace").split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                content = data.get("message", {}).get("content", "")
+                if content:
+                    full_response += content
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        yield chunk
+
+    cleaned_response = _strip_tags_for_display(full_response)
+
+    build_requests = _BUILD_TOOL_RE.findall(full_response)
+    if build_requests:
+        for desc in build_requests:
+            msg = f"\n\n---\n\U0001f528 *Building new tool: {desc.strip()}...*\n"
+            yield (json.dumps({"message": {"role": "assistant", "content": msg}, "done": False}) + "\n").encode()
+
+            build_result = await _build_tool(desc.strip(), body.get("model", FALLBACK_MODEL))
+
+            if build_result.get("ok"):
+                status = f"\u2714 Tool '{build_result['name']}' created and ready to use!\n\n"
+            else:
+                status = f"\u26a0\ufe0f Could not build tool: {build_result.get('error', 'Unknown error')}\n\n"
+            yield (json.dumps({"message": {"role": "assistant", "content": status}, "done": False}) + "\n").encode()
+
+        follow_up = dict(body)
+        msgs = list(follow_up.get("messages", []))
+        msgs.append({"role": "assistant", "content": cleaned_response})
+        msgs.append({"role": "user", "content": "The tools have been built. Now answer the original question using the newly available tools. Use <<TOOL:name(params)>> to call them."})
+        follow_up["messages"] = msgs
+        tools_summary = _get_tools_summary()
+        for m in follow_up["messages"]:
+            if m.get("role") == "system":
+                m["content"] = m["content"] + "\n\n" + tools_summary
+                break
+
+        full_response = ""
+        async for chunk in _chat_stream_with_token_log(follow_up, client_host):
+            for line in chunk.decode("utf-8", errors="replace").split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    content = data.get("message", {}).get("content", "")
+                    if content:
+                        full_response += content
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+            yield chunk
+
+    tool_calls = _parse_tool_calls(full_response)
+    if not tool_calls:
+        return
+
+    for t_name, t_params in tool_calls:
+        params_display = ", ".join(f"{k}={v}" for k, v in t_params.items())
+        progress_msg = f"\n\U0001f527 *Running tool: {t_name}({params_display})...*\n"
+        yield (json.dumps({"message": {"role": "assistant", "content": progress_msg}, "done": False}) + "\n").encode()
+
+    tool_results = []
+    for t_name, t_params in tool_calls:
+        result = await asyncio.to_thread(_execute_tool, t_name, t_params)
+        tool_results.append({"tool": t_name, "params": t_params, "result": result})
+        result_preview = json.dumps(result.get("result", result), indent=2)[:800]
+        yield (json.dumps({"message": {"role": "assistant", "content": f"\u2714 {t_name}: {result_preview}\n"}, "done": False}) + "\n").encode()
+
+    results_text = "\n\n".join(
+        f"Tool '{tr['tool']}' result: {json.dumps(tr['result'])}" for tr in tool_results
+    )
+
+    yield (json.dumps({"message": {"role": "assistant", "content": "\n---\n*Processing results...*\n\n"}, "done": False}) + "\n").encode()
+
+    yield (json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}) + "\n").encode()
+
+    yield b"\n"
+
+    follow_up = dict(body)
+    msgs = list(follow_up.get("messages", []))
+    msgs.append({"role": "assistant", "content": _strip_tags_for_display(full_response)})
+    msgs.append({"role": "user", "content": f"Here are the tool execution results:\n{results_text}\n\nUse these results to provide your final answer. Do NOT include <<TOOL:...>> or <<BUILD_TOOL:...>> tags \u2014 the tools have already been executed. Just give a natural response using the data."})
+    follow_up["messages"] = msgs
+
+    async for chunk in _chat_stream_with_token_log(follow_up, client_host):
+        yield chunk
+
+
 @app.post("/api/chat")
 async def chat(request: Request):
     body = await request.json()
     client_host = request.client.host if request.client else "unknown"
-
-    # Inject project knowledge if project_id is provided
+    log.debug("Chat request from %s model=%s messages=%d", client_host, body.get("model", "?"), len(body.get("messages", [])))
     project_id = body.pop("project_id", None)
     if project_id:
         knowledge_context = _get_project_knowledge_context(project_id)
         if knowledge_context:
-            # Prepend knowledge to messages as a system message
             messages = body.get("messages", [])
-            # Find existing system message or create one
             has_system = any(m.get("role") == "system" for m in messages)
             if has_system:
-                # Append knowledge to existing system message
                 for m in messages:
                     if m.get("role") == "system":
                         m["content"] = m["content"] + "\n\n" + knowledge_context
@@ -831,8 +1381,51 @@ async def chat(request: Request):
                 messages.insert(0, {"role": "system", "content": knowledge_context})
             body["messages"] = messages
 
+    tools_summary = _get_tools_summary()
+    if tools_summary:
+        messages = body.get("messages", [])
+        has_system = any(m.get("role") == "system" for m in messages)
+        if has_system:
+            for m in messages:
+                if m.get("role") == "system":
+                    m["content"] = m["content"] + "\n\n" + tools_summary
+                    break
+        else:
+            messages.insert(0, {"role": "system", "content": tools_summary})
+        body["messages"] = messages
+
+    user_messages = [m for m in body.get("messages", []) if m.get("role") == "user"]
+    last_user_msg = user_messages[-1]["content"] if user_messages else ""
+    pre_matches = _pre_match_tools(last_user_msg)
+    if pre_matches: log.info("Pre-matched tools: %s", [(n, p) for n, p in pre_matches])
+
+    if pre_matches:
+        tool_data_parts = []
+        for t_name, t_params in pre_matches:
+            result = await asyncio.to_thread(_execute_tool, t_name, t_params)
+            if result.get("result"):
+                tool_data_parts.append(
+                    f"[Tool data — {t_name}({', '.join(f'{k}={v}' for k, v in t_params.items())})]\n"
+                    f"{json.dumps(result['result'], indent=2)}"
+                )
+
+        if tool_data_parts:
+            tool_data_block = (
+                "\n\n--- LIVE TOOL DATA (real-time, use this to answer) ---\n"
+                + "\n\n".join(tool_data_parts)
+                + "\n--- END TOOL DATA ---"
+            )
+            messages = body.get("messages", [])
+            for m in messages:
+                if m.get("role") == "system":
+                    m["content"] = m["content"] + tool_data_block
+                    break
+            else:
+                messages.insert(0, {"role": "system", "content": tool_data_block.strip()})
+            body["messages"] = messages
+
     return StreamingResponse(
-        _chat_stream_with_token_log(body, client_host),
+        _chat_with_tool_execution(body, client_host),
         media_type="application/x-ndjson",
     )
 
@@ -870,10 +1463,6 @@ async def generate_image(request: Request):
     )
 
 
-# ---------------------------------------------------------------------------
-# Research Workstation: Web page content fetching
-# ---------------------------------------------------------------------------
-
 @app.post("/api/fetch-page")
 async def fetch_page(request: Request):
     """Fetch a URL, strip HTML, return clean text."""
@@ -897,7 +1486,6 @@ async def fetch_page(request: Request):
 
     soup = BeautifulSoup(resp.text, "lxml")
 
-    # Remove unwanted tags
     for tag in soup.find_all(["script", "style", "nav", "footer", "header", "aside"]):
         tag.decompose()
 
@@ -908,12 +1496,22 @@ async def fetch_page(request: Request):
     return {"url": url, "title": title, "content": content}
 
 
-# ---------------------------------------------------------------------------
-# Research Workstation: Project CRUD
-# ---------------------------------------------------------------------------
-
 PROJECTS_DIR = Path.home() / "OfflineAI-Projects"
 PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+
+PLUGINS_DIR = Path.home() / "OfflineAI-Plugins"
+PLUGINS_DIR.mkdir(parents=True, exist_ok=True)
+(PLUGINS_DIR / "tools").mkdir(exist_ok=True)
+(PLUGINS_DIR / "logs").mkdir(exist_ok=True)
+_REGISTRY_FILE = PLUGINS_DIR / "registry.json"
+if not _REGISTRY_FILE.exists():
+    _REGISTRY_FILE.write_text("[]", encoding="utf-8")
+
+_TOOL_BLOCKED_PATTERNS = [
+    "os.system", "subprocess", "eval(", "exec(", "__import__",
+    "open(", "pathlib", "shutil", "glob",
+    "compile(",
+]
 
 
 def _slugify(text: str) -> str:
@@ -1000,6 +1598,7 @@ async def create_project(request: Request):
     }
     (project_dir / "knowledge.json").write_text(json.dumps(knowledge, indent=2), encoding="utf-8")
 
+    log.info("Project created: %s (%s)", name, slug)
     return {
         "id": slug,
         "name": name,
@@ -1046,6 +1645,7 @@ async def delete_project(project_id: str):
         return JSONResponse({"error": "Project not found"}, status_code=404)
 
     shutil.rmtree(project_dir)
+    log.info("Project deleted: %s", project_id)
     return {"ok": True}
 
 
@@ -1079,7 +1679,6 @@ async def get_project_file(project_id: str, file_path: str):
         return JSONResponse({"error": "File not found"}, status_code=404)
 
     size = target.stat().st_size
-    # Try reading as text
     try:
         content = target.read_text(encoding="utf-8")
         return {"path": file_path, "content": content, "size": size}
@@ -1094,7 +1693,6 @@ async def write_project_file(project_id: str, file_path: str, request: Request):
     if target is None:
         return JSONResponse({"error": "Invalid file path"}, status_code=400)
 
-    # Ensure the project directory exists
     project_dir = _resolve_project_path(project_id)
     if project_dir is None or not project_dir.is_dir():
         return JSONResponse({"error": "Project not found"}, status_code=404)
@@ -1137,9 +1735,38 @@ async def download_project_file(project_id: str, file_path: str):
     )
 
 
-# ---------------------------------------------------------------------------
-# Research Agent: Autonomous multi-step web research
-# ---------------------------------------------------------------------------
+@app.get("/api/projects/{project_id}/view/{file_path:path}")
+async def view_project_file(project_id: str, file_path: str):
+    """Serve a file inline (opens in browser instead of downloading). Useful for PDFs."""
+    target = _resolve_project_path(project_id, file_path)
+    if target is None:
+        return JSONResponse({"error": "Invalid file path"}, status_code=400)
+    if not target.is_file():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+
+    ext = target.suffix.lower()
+    mime_types = {
+        ".pdf": "application/pdf",
+        ".html": "text/html",
+        ".htm": "text/html",
+        ".md": "text/markdown",
+        ".txt": "text/plain",
+        ".json": "application/json",
+        ".csv": "text/csv",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".svg": "image/svg+xml",
+    }
+    media_type = mime_types.get(ext, "application/octet-stream")
+
+    return FileResponse(
+        path=str(target),
+        filename=target.name,
+        media_type=media_type,
+        headers={"Content-Disposition": f"inline; filename=\"{target.name}\""},
+    )
 
 
 @app.get("/api/projects/{project_id}/knowledge")
@@ -1172,7 +1799,6 @@ async def research_project(project_id: str, request: Request):
     model = body.get("model", FALLBACK_MODEL)
     num_queries = {"quick": 3, "standard": 5, "deep": 8}.get(depth, 5)
 
-    # Validate project exists
     project_path = PROJECTS_DIR / project_id
     if not project_path.is_dir():
         return JSONResponse({"error": "Project not found"}, status_code=404)
@@ -1183,24 +1809,31 @@ async def research_project(project_id: str, request: Request):
 
     async def research_stream():
         try:
-            # Step 1: Generate search queries using LLM
             yield _sse_event({"type": "status", "message": f"Planning research on: {topic}"})
+            log.info("Research started: %s depth=%s", topic, depth)
 
-            queries = await _generate_search_queries(topic, num_queries, model)
+            try:
+                queries = await _generate_search_queries(topic, num_queries, model)
+            except Exception:
+                queries = [topic]
             yield _sse_event({"type": "status", "message": f"Generated {len(queries)} search queries"})
 
-            # Step 2: Execute searches and collect results
             all_sources = []
             all_page_content = []
+            search_errors = 0
 
             for i, query in enumerate(queries):
                 yield _sse_event({"type": "status", "message": f"Searching ({i+1}/{len(queries)}): {query}"})
 
-                # Search
-                search_results = await _do_web_search(query, max_results=5)
+                try:
+                    search_results = await _do_web_search(query, max_results=5)
+                except Exception:
+                    search_results = []
+                    search_errors += 1
+                    yield _sse_event({"type": "status", "message": f"⚠ Search failed for: {query}, continuing..."})
+
                 yield _sse_event({"type": "search", "query": query, "results_count": len(search_results)})
 
-                # Fetch top results
                 for result in search_results[:2]:
                     url = result.get("href", "")
                     title = result.get("title", "")
@@ -1213,27 +1846,45 @@ async def research_project(project_id: str, request: Request):
                         "fetched_at": datetime.now(timezone.utc).isoformat(),
                     })
 
-                    # Try to fetch full page content
-                    page_text = await _fetch_page_content(url)
-                    if page_text:
-                        all_page_content.append(f"Source: {title} ({url})\n{page_text[:5000]}")
-                        yield _sse_event({"type": "source", "message": f"Read: {title}"})
+                    try:
+                        page_text = await _fetch_page_content(url)
+                        if page_text:
+                            all_page_content.append(f"Source: {title} ({url})\n{page_text[:5000]}")
+                            yield _sse_event({"type": "source", "message": f"Read: {title}"})
+                    except Exception:
+                        yield _sse_event({"type": "status", "message": f"⚠ Could not read: {title[:50]}"})
 
-            # Step 3: Extract findings using LLM
+            if not all_sources and not all_page_content:
+                yield _sse_event({"type": "error", "error": f"All {len(queries)} searches failed. Check your internet connection."})
+                return
+
+            if search_errors > 0:
+                yield _sse_event({"type": "status", "message": f"Completed with {search_errors} failed search(es), {len(all_sources)} sources found"})
+
             yield _sse_event({"type": "status", "message": "Analyzing sources and extracting findings..."})
 
-            findings_text = await _extract_findings(topic, all_page_content, model)
-            yield _sse_event({"type": "finding", "text": findings_text[:500]})
+            try:
+                findings_text = await _extract_findings(topic, all_page_content, model)
+            except Exception as exc:
+                findings_text = "Key findings from search results:\n\n" + "\n\n".join(
+                    f"- {s.get('title', 'Unknown')}: {s.get('snippet', '')}" for s in all_sources[:10]
+                )
+                yield _sse_event({"type": "status", "message": f"⚠ Analysis partially failed ({exc}), using raw findings"})
 
-            # Step 4: Generate comprehensive summary
+            yield _sse_event({"type": "finding", "text": findings_text[:2000]})
+
             yield _sse_event({"type": "status", "message": "Writing comprehensive summary..."})
 
-            summary = await _synthesize_summary(topic, findings_text, all_sources, model)
+            try:
+                summary = await _synthesize_summary(topic, findings_text, all_sources, model)
+            except Exception as exc:
+                summary = f"# Research: {topic}\n\n## Findings\n\n{findings_text}\n\n## Sources\n\n" + "\n".join(
+                    f"- [{s.get('title', 'Unknown')}]({s.get('url', '')})" for s in all_sources[:10]
+                )
+                yield _sse_event({"type": "status", "message": f"⚠ Summary generation failed ({exc}), using raw findings"})
 
-            # Step 5: Save to project
             yield _sse_event({"type": "status", "message": "Saving research to project..."})
 
-            # Save summary as a note
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             topic_slug = _slugify(topic)[:40]
             note_filename = f"{timestamp}-{topic_slug}.md"
@@ -1242,17 +1893,20 @@ async def research_project(project_id: str, request: Request):
             note_path = notes_dir / note_filename
             note_path.write_text(summary, encoding="utf-8")
 
-            # Update knowledge.json
+            pdf_filename = f"{timestamp}-{topic_slug}.pdf"
+            try:
+                await asyncio.to_thread(_save_markdown_as_pdf, summary, notes_dir / pdf_filename, topic)
+            except Exception:
+                pass
+
             knowledge = json.loads(knowledge_file.read_text(encoding="utf-8"))
 
-            # Add sources (deduplicate by URL)
             existing_urls = {s["url"] for s in knowledge.get("sources", [])}
             for src in all_sources:
                 if src["url"] not in existing_urls:
                     knowledge.setdefault("sources", []).append(src)
                     existing_urls.add(src["url"])
 
-            # Add finding
             knowledge.setdefault("findings", []).append({
                 "topic": topic,
                 "summary": findings_text[:2000],
@@ -1261,6 +1915,9 @@ async def research_project(project_id: str, request: Request):
             })
 
             knowledge_file.write_text(json.dumps(knowledge, indent=2, ensure_ascii=False), encoding="utf-8")
+
+            log.info("Research complete: %s — %d sources", topic, len(all_sources))
+            yield _sse_event({"type": "content", "text": summary})
 
             yield _sse_event({
                 "type": "done",
@@ -1276,11 +1933,6 @@ async def research_project(project_id: str, request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-# ---------------------------------------------------------------------------
-# Generation Endpoints: Document, PDF export, Data, Code, Workflow
-# ---------------------------------------------------------------------------
 
 
 def _parse_code_files(content: str) -> list[tuple[str, str]]:
@@ -1301,7 +1953,6 @@ def _parse_code_files(content: str) -> list[tuple[str, str]]:
 def _parse_workflow_plan(text: str) -> list[dict]:
     """Parse a JSON workflow plan from LLM output."""
     text = text.strip()
-    # Try to extract JSON from markdown code fences
     if "```" in text:
         lines = text.split("\n")
         in_fence = False
@@ -1315,7 +1966,6 @@ def _parse_workflow_plan(text: str) -> list[dict]:
         if json_lines:
             text = "\n".join(json_lines)
 
-    # Try to find JSON array
     start = text.find("[")
     end = text.rfind("]")
     if start >= 0 and end > start:
@@ -1351,12 +2001,10 @@ async def generate_document(project_id: str, request: Request):
         try:
             yield _sse_event({"type": "status", "message": f"Generating {doc_type}: {topic}"})
 
-            # Build context from project knowledge
             context = ""
             if use_knowledge:
                 context = _get_project_knowledge_context(project_id, max_chars=6000)
 
-            # Generate document
             prompt = f"""Write a comprehensive {doc_type} about: "{topic}"
 
 {f'Use this research context to inform your writing:{chr(10)}{context}' if context else ''}
@@ -1387,7 +2035,6 @@ Be thorough, detailed, and well-organized."""
                 yield _sse_event({"type": "error", "error": "Model returned empty content"})
                 return
 
-            # Save to project
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             topic_slug = _slugify(topic)[:40]
             filename = f"{timestamp}-{topic_slug}.md"
@@ -1395,6 +2042,15 @@ Be thorough, detailed, and well-organized."""
             output_dir.mkdir(exist_ok=True)
             file_path = output_dir / filename
             file_path.write_text(content, encoding="utf-8")
+            log.info("Document generated: %s", filename)
+
+            pdf_filename = f"{timestamp}-{topic_slug}.pdf"
+            pdf_path = output_dir / pdf_filename
+            try:
+                await asyncio.to_thread(_save_markdown_as_pdf, content, pdf_path, topic)
+                yield _sse_event({"type": "status", "message": f"PDF saved: output/{pdf_filename}"})
+            except Exception:
+                pass
 
             yield _sse_event({"type": "content", "text": content})
             yield _sse_event({"type": "done", "message": "Document generated", "file_path": f"output/{filename}"})
@@ -1411,7 +2067,7 @@ Be thorough, detailed, and well-organized."""
 
 @app.post("/api/projects/{project_id}/export-pdf")
 async def export_pdf(project_id: str, request: Request):
-    """Convert a Markdown file to PDF (via HTML)."""
+    """Convert a Markdown file to a human-readable PDF."""
     body = await request.json()
     file_path = (body.get("file_path") or "").strip()
     if not file_path:
@@ -1423,29 +2079,46 @@ async def export_pdf(project_id: str, request: Request):
 
     md_content = resolved.read_text(encoding="utf-8")
 
-    # Convert Markdown to HTML
     if _MARKDOWN_AVAILABLE:
-        html_body = _markdown_lib.markdown(md_content, extensions=["tables", "fenced_code"])
+        html_body = _markdown_lib.markdown(md_content, extensions=["tables", "fenced_code", "toc", "nl2br"])
     else:
-        # Basic fallback: wrap in pre tags
         html_body = f"<pre>{md_content}</pre>"
 
     html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>{file_path}</title>
+<html><head><meta charset="utf-8"><title>{Path(file_path).stem}</title>
 <style>
-body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #1a1a1a; }}
-h1 {{ border-bottom: 2px solid #eee; padding-bottom: 10px; }}
-h2 {{ border-bottom: 1px solid #eee; padding-bottom: 6px; margin-top: 30px; }}
-code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }}
-pre {{ background: #f4f4f4; padding: 16px; border-radius: 6px; overflow-x: auto; }}
+@page {{ size: A4; margin: 2.5cm; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 11pt; line-height: 1.7; color: #1a1a1a; }}
+h1 {{ font-size: 22pt; border-bottom: 2px solid #333; padding-bottom: 8px; margin-top: 0; margin-bottom: 16px; }}
+h2 {{ font-size: 16pt; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 28px; color: #2c3e50; }}
+h3 {{ font-size: 13pt; margin-top: 20px; color: #34495e; }}
+p {{ margin: 8px 0; text-align: justify; }}
+ul, ol {{ margin: 8px 0; padding-left: 24px; }}
+li {{ margin: 4px 0; }}
+code {{ background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-size: 0.88em; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; }}
+pre {{ background: #f8f8f8; padding: 14px 18px; border-radius: 6px; overflow-x: auto; border: 1px solid #e8e8e8; font-size: 0.85em; line-height: 1.5; }}
 pre code {{ background: none; padding: 0; }}
-table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
+table {{ border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 0.92em; }}
 th, td {{ border: 1px solid #ddd; padding: 8px 12px; text-align: left; }}
-th {{ background: #f8f8f8; font-weight: 600; }}
-blockquote {{ border-left: 4px solid #ddd; margin: 16px 0; padding: 8px 16px; color: #666; }}
+th {{ background: #f0f0f0; font-weight: 600; }}
+tr:nth-child(even) {{ background: #fafafa; }}
+blockquote {{ border-left: 4px solid #3498db; margin: 14px 0; padding: 10px 18px; color: #555; background: #f9fbfd; border-radius: 0 4px 4px 0; }}
+a {{ color: #2980b9; text-decoration: none; }}
+hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
 </style></head><body>{html_body}</body></html>"""
 
-    # Return HTML file (browsers can Print > Save as PDF)
+    if _WEASYPRINT_AVAILABLE:
+        def _generate_pdf():
+            doc = _weasyprint.HTML(string=html)
+            return doc.write_pdf()
+
+        pdf_bytes = await asyncio.to_thread(_generate_pdf)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{Path(file_path).stem}.pdf"'},
+        )
+
     return Response(
         content=html.encode("utf-8"),
         media_type="text/html",
@@ -1504,18 +2177,15 @@ Rules:
                 yield _sse_event({"type": "error", "error": "Model returned empty content"})
                 return
 
-            # Clean up: strip markdown code fences if present
             content = content.strip()
             if content.startswith("```"):
                 lines = content.split("\n")
-                # Remove first line (```csv or ```json) and last line (```)
                 if lines[-1].strip() == "```":
                     lines = lines[1:-1]
                 else:
                     lines = lines[1:]
                 content = "\n".join(lines)
 
-            # Save to project
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             topic_slug = _slugify(topic)[:30]
             ext = "csv" if data_format == "csv" else "json"
@@ -1587,11 +2257,9 @@ Rules:
                 yield _sse_event({"type": "error", "error": "Model returned empty content"})
                 return
 
-            # Parse files from the response
             files = _parse_code_files(content)
 
             if not files:
-                # Fallback: save as a single file
                 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
                 slug = _slugify(description)[:30]
                 filename = f"{timestamp}-{slug}.txt"
@@ -1602,7 +2270,6 @@ Rules:
                 yield _sse_event({"type": "done", "message": "Code generated (single file)", "files_count": 1})
                 return
 
-            # Save each file
             timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             slug = _slugify(description)[:30]
             code_dir = project_path / "output" / "code" / f"{timestamp}-{slug}"
@@ -1610,7 +2277,6 @@ Rules:
 
             saved_files = []
             for file_path, file_content in files:
-                # Security: prevent path traversal
                 safe_path = Path(file_path.lstrip("/").replace("..", ""))
                 full_path = code_dir / safe_path
                 full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1647,7 +2313,6 @@ async def run_workflow(project_id: str, request: Request):
 
     async def workflow_stream():
         try:
-            # Step 1: Plan the workflow using LLM
             yield _sse_event({"type": "status", "message": "Planning workflow..."})
 
             plan_prompt = f"""Analyze this request and break it into ordered steps. For each step, specify the type.
@@ -1673,15 +2338,12 @@ Return ONLY a JSON array of steps, no explanation. Example:
                 plan_data = resp.json()
                 plan_text = plan_data.get("message", {}).get("content", "")
 
-            # Parse the plan
             steps = _parse_workflow_plan(plan_text)
             if not steps:
-                # Fallback: treat as a single document generation
                 steps = [{"type": "document", "description": user_request}]
 
             yield _sse_event({"type": "plan", "steps": steps})
 
-            # Step 2: Execute each step
             for i, step in enumerate(steps):
                 step_type = step.get("type", "document")
                 step_desc = step.get("description", user_request)
@@ -1695,7 +2357,6 @@ Return ONLY a JSON array of steps, no explanation. Example:
                 })
 
                 if step_type == "research":
-                    # Execute research
                     queries = await _generate_search_queries(step_desc, 3, model)
                     all_sources = []
                     all_content = []
@@ -1709,7 +2370,6 @@ Return ONLY a JSON array of steps, no explanation. Example:
 
                     if all_content:
                         findings = await _extract_findings(step_desc, all_content, model)
-                        # Save findings to knowledge
                         knowledge_file = project_path / "knowledge.json"
                         knowledge = json.loads(knowledge_file.read_text(encoding="utf-8"))
                         knowledge.setdefault("findings", []).append({
@@ -1723,7 +2383,6 @@ Return ONLY a JSON array of steps, no explanation. Example:
                     yield _sse_event({"type": "step_done", "step": i + 1, "message": f"Research complete: {len(all_sources)} sources found"})
 
                 elif step_type == "document":
-                    # Generate document
                     context = _get_project_knowledge_context(project_id, max_chars=6000)
                     doc_prompt = f"Write a comprehensive document about: {step_desc}\n\n{context if context else ''}"
 
@@ -1747,7 +2406,6 @@ Return ONLY a JSON array of steps, no explanation. Example:
                     yield _sse_event({"type": "step_done", "step": i + 1, "message": "Document generated"})
 
                 elif step_type == "code":
-                    # Generate code
                     code_prompt = f"""Generate a complete code project for: "{step_desc}"
 
 For EACH file use: === FILE: path === ... === END FILE ==="""
@@ -1780,7 +2438,6 @@ For EACH file use: === FILE: path === ... === END FILE ==="""
                     yield _sse_event({"type": "step_done", "step": i + 1, "message": "Code generated"})
 
                 elif step_type == "data":
-                    # Generate data
                     data_prompt = f"""Generate a CSV dataset about: "{step_desc}"
 Return ONLY CSV content with headers. No explanations."""
 
@@ -1827,6 +2484,61 @@ Return ONLY CSV content with headers. No explanations."""
     )
 
 
+@app.get("/api/tools")
+async def list_tools():
+    return {"tools": _load_tool_registry()}
+
+@app.get("/api/tools/{tool_name}")
+async def get_tool(tool_name: str):
+    registry = _load_tool_registry()
+    tool = next((t for t in registry if t["name"] == tool_name), None)
+    if not tool:
+        return JSONResponse({"error": "Tool not found"}, status_code=404)
+    module_path = PLUGINS_DIR / tool["module"]
+    code = module_path.read_text(encoding="utf-8") if module_path.exists() else ""
+    return {**tool, "code": code}
+
+@app.post("/api/tools/{tool_name}/execute")
+async def execute_tool_endpoint(tool_name: str, request: Request):
+    body = await request.json()
+    params = body.get("params", {})
+    result = await asyncio.to_thread(_execute_tool, tool_name, params)
+    return result
+
+@app.delete("/api/tools/{tool_name}")
+async def delete_tool(tool_name: str):
+    registry = _load_tool_registry()
+    tool = next((t for t in registry if t["name"] == tool_name), None)
+    if not tool:
+        return JSONResponse({"error": "Tool not found"}, status_code=404)
+    module_path = PLUGINS_DIR / tool["module"]
+    if module_path.exists():
+        module_path.unlink()
+    registry = [t for t in registry if t["name"] != tool_name]
+    _save_tool_registry(registry)
+    return {"ok": True}
+
+@app.post("/api/tools/{tool_name}/toggle")
+async def toggle_tool(tool_name: str):
+    registry = _load_tool_registry()
+    for t in registry:
+        if t["name"] == tool_name:
+            t["enabled"] = not t.get("enabled", True)
+            _save_tool_registry(registry)
+            return {"ok": True, "enabled": t["enabled"]}
+    return JSONResponse({"error": "Tool not found"}, status_code=404)
+
+@app.post("/api/tools/build")
+async def build_tool_endpoint(request: Request):
+    body = await request.json()
+    description = (body.get("description") or "").strip()
+    model = body.get("model", FALLBACK_MODEL)
+    if not description:
+        return JSONResponse({"error": "No description provided"}, status_code=400)
+    result = await _build_tool(description, model)
+    return result
+
+
 if __name__ == "__main__":
     import socket
     import uvicorn
@@ -1844,16 +2556,16 @@ if __name__ == "__main__":
         except Exception:
             lan_ip = "127.0.0.1"
 
-    print("══════════════════════════════════════════")
-    print("  OfflineAI")
-    print(f"  Local:    http://127.0.0.1:{port}")
+    log.info("══════════════════════════════════════════")
+    log.info("  OfflineAI")
+    log.info(f"  Local:    http://127.0.0.1:{port}")
     if lan_ip:
-        print(f"  Network:  http://{lan_ip}:{port}")
+        log.info(f"  Network:  http://{lan_ip}:{port}")
         if AUTH_REQUIRED:
-            print(f"  Token:    {AUTH_TOKEN}")
+            log.info(f"  Token:    {AUTH_TOKEN}")
     else:
-        print("  Network:  disabled (set OFFLINEAI_HOST=0.0.0.0 to expose)")
-    print("══════════════════════════════════════════")
-    print("Make sure Ollama is running: ollama serve")
-    print(f"Make sure model is available: ollama pull {FALLBACK_MODEL}")
+        log.info("  Network:  disabled (set OFFLINEAI_HOST=0.0.0.0 to expose)")
+    log.info("══════════════════════════════════════════")
+    log.info("Make sure Ollama is running: ollama serve")
+    log.info(f"Make sure model is available: ollama pull {FALLBACK_MODEL}")
     uvicorn.run(app, host=host, port=port)

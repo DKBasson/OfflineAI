@@ -6,6 +6,7 @@ import { GeneralSettings } from './settings/GeneralSettings';
 import { ModelsSettings } from './settings/ModelsSettings';
 import { PromptsSettings } from './settings/PromptsSettings';
 import { SystemSettings } from './settings/SystemSettings';
+import { ToolsPanel } from './ToolsPanel';
 
 export function SettingsPanel() {
   const {
@@ -31,7 +32,7 @@ export function SettingsPanel() {
     updateModelHealth,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'general' | 'models' | 'prompts' | 'system'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'models' | 'prompts' | 'system' | 'tools'>('general');
   const [form, setForm] = useState<Settings>(loadSettings);
   const [pullModelInput, setPullModelInput] = useState('');
   const [pullImageInput, setPullImageInput] = useState('');
@@ -69,7 +70,6 @@ export function SettingsPanel() {
     }
   }, [isSettingsOpen, refreshState]);
 
-  // Clear pull input after successful pull
   useEffect(() => {
     if (pullStatus.includes('ready')) {
       setPullModelInput('');
@@ -146,6 +146,7 @@ export function SettingsPanel() {
               { id: 'models',  label: 'Models'  },
               { id: 'prompts', label: 'Prompts'  },
               { id: 'system',  label: 'System'   },
+              { id: 'tools',   label: 'Tools'    },
             ] as const
           ).map((tab) => (
             <button
@@ -215,6 +216,8 @@ export function SettingsPanel() {
               }}
             />
           )}
+
+          {activeTab === 'tools' && <ToolsPanel />}
         </div>
 
         {/* Save button */}

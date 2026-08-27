@@ -16,7 +16,6 @@ export function highlightCodeBlocks(container: HTMLElement): void {
     const pre = block.parentElement;
     if (!pre || pre.querySelector('.code-actions')) return;
 
-    // Detect language from class for file extension
     const langClass = Array.from(block.classList).find(c => c.startsWith('language-'));
     const lang = langClass?.replace('language-', '') || 'txt';
 
@@ -24,7 +23,6 @@ export function highlightCodeBlocks(container: HTMLElement): void {
     actionsDiv.className = 'code-actions';
     actionsDiv.style.cssText = 'position:absolute;top:6px;right:6px;display:flex;gap:4px;opacity:0;transition:opacity 0.15s;';
 
-    // Copy button
     const copyBtn = document.createElement('button');
     copyBtn.textContent = 'Copy';
     copyBtn.title = 'Copy code';
@@ -35,7 +33,6 @@ export function highlightCodeBlocks(container: HTMLElement): void {
       setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
     };
 
-    // Save button
     const saveBtn = document.createElement('button');
     saveBtn.textContent = 'Save';
     saveBtn.title = 'Save code to file';

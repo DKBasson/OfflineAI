@@ -19,12 +19,10 @@ export function ChatArea() {
   const [chatSearch, setChatSearch] = useState('');
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
 
-  // Scroll to bottom on new messages/streaming content
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Ctrl+F / Cmd+F to open in-conversation search
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const mod = /Mac/.test(navigator.userAgent) ? e.metaKey : e.ctrlKey;
@@ -41,7 +39,6 @@ export function ChatArea() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [messages.length, chatSearchOpen]);
 
-  // Close search when conversation changes
   useEffect(() => {
     setChatSearchOpen(false);
     setChatSearch('');
@@ -161,7 +158,6 @@ export function ChatArea() {
 }
 
 function StreamingMessage({ content }: { content: string }) {
-  // Detect if this is progress output (multiple lines with status indicators)
   const lines = content.split('\n');
   const isProgress = lines.length > 1 && lines.some(l => l.startsWith('✔') || l.startsWith('📄') || l.startsWith('📋') || l.startsWith('🔍'));
 

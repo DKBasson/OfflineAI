@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import type { ProjectFile } from '../types';
-import { readProjectFile, getProjectDownloadUrl } from '../utils/api';
+import { readProjectFile, getProjectDownloadUrl, getProjectViewUrl, authHeaders } from '../utils/api';
 
 export function ProjectFileBrowser() {
   const { activeProject, projectFiles, refreshProjectFiles } = useApp();
@@ -9,7 +9,6 @@ export function ProjectFileBrowser() {
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Reset preview when project changes
   useEffect(() => {
     setPreviewPath(null);
     setPreviewContent(null);
@@ -17,6 +16,10 @@ export function ProjectFileBrowser() {
 
   const handleFileClick = useCallback(async (filePath: string) => {
     if (!activeProject) return;
+    if (filePath.endsWith('.pdf')) {
+      window.open(getProjectViewUrl(activeProject.id, filePath), '_blank');
+      return;
+    }
     setPreviewPath(filePath);
     setLoading(true);
     const content = await readProjectFile(activeProject.id, filePath);
@@ -30,7 +33,6 @@ export function ProjectFileBrowser() {
 
   if (!activeProject) return null;
 
-  // Group files by directory
   const grouped = groupByDirectory(projectFiles);
 
   return (
@@ -119,6 +121,17 @@ function DirectoryGroup({
               <span className="text-[9px] text-text-dim shrink-0">
                 {formatFileSize(f.size)}
               </span>
+              {f.path.endsWith('.pdf') && (
+                <a
+                  href={getProjectViewUrl(projectId, f.path)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="opacity-0 group-hover:opacity-100 text-[10px] text-red-400 shrink-0"
+                  title="Open PDF"
+                >
+                  ▶
+                </a>
+              )}
               <a
                 href={getProjectDownloadUrl(projectId, f.path)}
                 className="opacity-0 group-hover:opacity-100 text-[10px] text-accent shrink-0"
@@ -161,6 +174,28 @@ function FilePreviewModal({
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <span className="text-[13px] text-text-primary font-medium truncate">{path}</span>
           <div className="flex items-center gap-2">
+            {isMarkdown && (
+              <button
+                className="text-[11px] text-red-400 hover:underline"
+                onClick={async () => {
+                  const r = await fetch(
+                    `/api/projects/${encodeURIComponent(projectId)}/export-pdf`,
+                    {
+                      method: 'POST',
+                      headers: authHeaders({ 'Content-Type': 'application/json' }),
+                      body: JSON.stringify({ file_path: path }),
+                    },
+                  );
+                  if (r.ok) {
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    window.open(url, '_blank');
+                  }
+                }}
+              >
+                Export PDF
+              </button>
+            )}
             <a
               href={getProjectDownloadUrl(projectId, path)}
               className="text-[11px] text-accent hover:underline"
@@ -204,7 +239,6 @@ function groupByDirectory(files: ProjectFile[]): Record<string, ProjectFile[]> {
     if (!groups[dir]) groups[dir] = [];
     groups[dir].push(f);
   }
-  // Sort: root files first, then directories alphabetically
   const sorted: Record<string, ProjectFile[]> = {};
   const keys = Object.keys(groups).sort((a, b) => {
     if (a === '.') return -1;
