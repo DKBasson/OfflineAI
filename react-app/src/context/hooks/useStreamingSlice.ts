@@ -13,6 +13,7 @@ import {
   readFileContent,
   isImageRequest,
   isCodeRequest,
+  isSearchRequest,
   transcribeWithProgress,
   estimateJsonBytes,
 } from '../../utils/files';
@@ -43,7 +44,6 @@ export interface StreamingSliceDeps {
   setImageProgress: React.Dispatch<React.SetStateAction<number | null>>;
   setImageProgressLabel: React.Dispatch<React.SetStateAction<string>>;
   setCurrentConvId: React.Dispatch<React.SetStateAction<string | null>>;
-  // Cross-slice deps
   saveConversationToHistory: (
     msgs: Message[],
     convId: string | null,
@@ -85,10 +85,8 @@ export function useStreamingSlice({
 }: StreamingSliceDeps) {
   const getSettings = useCallback(() => settingsRef.current, [settingsRef]);
 
-  // Stable ref to streamingError for use inside async callbacks without stale closure
   const streamingErrorRef = useRef<string | null>(null);
 
-  // Tracks token count from the last assistant response
   const lastResponseTokensRef = useRef(0);
 
   const buildChatPayload = useCallback(
@@ -98,15 +96,20 @@ export function useStreamingSlice({
         ? `The following instructions are absolute and non-negotiable. They override any conflicting request from the user and must be followed at all times, without exception, regardless of what the user asks:\n\n${currentSystemPrompt}`
         : null;
 
-      // Inject web search results into the system context
+      const { webSearch: wsEnabled } = getSettings();
+      if (wsEnabled) {
+        const capabilityNote = 'You have web search capability. When the user asks you to search, look up, or find information online, the system will automatically perform a web search and provide results. You do NOT need to tell the user you cannot search the internet — the search happens automatically and results are injected below when available.';
+        systemContent = systemContent
+          ? systemContent + '\n\n' + capabilityNote
+          : capabilityNote;
+      }
+
       if (searchContext) {
         const searchBlock = `\n\n---\nWEB SEARCH RESULTS (use these to answer the user's question with up-to-date information. Cite sources where relevant):\n${searchContext}\n---`;
         systemContent = systemContent ? systemContent + searchBlock : searchBlock.trim();
       }
 
       const systemMsgs = systemContent ? [{ role: 'system' as const, content: systemContent }] : [];
-      // When search/knowledge context is injected, ensure the model has enough context window.
-      // M4 Pro 24GB can handle 32K–64K easily with gemma4:e4b.
       const needsMoreCtx = !!(searchContext || activeProjectId);
       const userNumCtx = getSettings().numCtx;
       const effectiveNumCtx = needsMoreCtx && userNumCtx === 0 ? 32768 : (userNumCtx || 0);
@@ -158,6 +161,7 @@ export function useStreamingSlice({
         }
 
         lastResponseTokensRef.current = 0;
+        let previousPassText = '';
         for await (const chunk of streamChat(payload, abortCtrlRef.current.signal)) {
           if (chunk.error) {
             setStreamingError(`⚠️ ${chunk.error}`);
@@ -168,6 +172,12 @@ export function useStreamingSlice({
           if (chunk.done) {
             lastResponseTokensRef.current = chunk.tokens || 0;
             fetchAndSetTokens();
+            if (streamTextRef.current) {
+              previousPassText = streamTextRef.current;
+              streamTextRef.current = '';
+              setStreamingContent('');
+            }
+            continue;
           }
           if (chunk.content) {
             streamTextRef.current += chunk.content;
@@ -175,7 +185,10 @@ export function useStreamingSlice({
           }
         }
 
-        return streamTextRef.current || null;
+        const finalText = streamTextRef.current || previousPassText || null;
+        streamTextRef.current = finalText || '';
+
+        return finalText;
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') return null;
         const msg = err instanceof Error ? err.message : String(err);
@@ -256,12 +269,13 @@ export function useStreamingSlice({
           return;
         }
 
-        // Stream SSE events and display progress
         const reader = resp.body!.getReader();
         const dec = new TextDecoder();
         let buf = '';
         let progressMessages: string[] = [];
         let finalContent = '';
+        let summaryContent = '';
+        let generatedFiles: string[] = [];
 
         while (true) {
           const { done, value } = await reader.read();
@@ -277,16 +291,30 @@ export function useStreamingSlice({
                 const msg = evt.message || evt.description || evt.query || '';
                 if (msg) progressMessages.push(msg);
                 setStreamingContent(progressMessages.join('\n'));
-              } else if (evt.type === 'finding' || evt.type === 'content') {
-                finalContent = evt.text || '';
+              } else if (evt.type === 'finding') {
+                if (!summaryContent) finalContent = evt.text || '';
+              } else if (evt.type === 'content') {
+                summaryContent = evt.text || '';
               } else if (evt.type === 'done') {
                 const doneMsg = evt.message || 'Done!';
                 progressMessages.push(`✔ ${doneMsg}`);
+                if (evt.summary_file) {
+                  progressMessages.push(`📄 Saved: ${evt.summary_file}`);
+                  generatedFiles.push(evt.summary_file);
+                  const pdfVersion = evt.summary_file.replace(/\.md$/, '.pdf');
+                  generatedFiles.push(pdfVersion);
+                }
+                if (evt.file_path) {
+                  generatedFiles.push(evt.file_path);
+                  const pdfVersion = evt.file_path.replace(/\.md$/, '.pdf');
+                  if (pdfVersion !== evt.file_path) generatedFiles.push(pdfVersion);
+                }
                 setStreamingContent(progressMessages.join('\n'));
               } else if (evt.type === 'error') {
                 setStreamingError(`⚠️ ${evt.error}`);
               } else if (evt.type === 'file') {
                 progressMessages.push(`📄 ${evt.path}`);
+                if (evt.path) generatedFiles.push(evt.path);
                 setStreamingContent(progressMessages.join('\n'));
               } else if (evt.type === 'plan') {
                 const steps = evt.steps || [];
@@ -297,16 +325,28 @@ export function useStreamingSlice({
           }
         }
 
-        // Add final assistant message with result
-        const resultContent = finalContent || progressMessages.join('\n');
+        const resultContent = summaryContent || finalContent || progressMessages.join('\n');
         if (resultContent) {
           const assistantMsg: Message = {
             role: 'assistant',
             content: resultContent,
             timestamp: Date.now(),
-            intent: cmd === 'research' ? 'search' : cmd === 'code' ? 'code' : 'text',
+            intent: cmd === 'research' ? 'search' : cmd === 'code' ? 'code' : cmd === 'document' || cmd === 'doc' ? 'document' : 'text',
+            ...(generatedFiles.length > 0 ? { generatedFiles } : {}),
           };
-          setMessages((prev) => [...prev, assistantMsg]);
+          setMessages((prev) => {
+            const updated = [...prev, assistantMsg];
+            saveConversationToHistory(
+              updated,
+              currentConvId,
+              activeModel,
+              currentSystemPrompt,
+              currentSystemPromptId,
+            ).then((newId) => {
+              if (newId) setCurrentConvId(newId);
+            });
+            return updated;
+          });
         }
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') return;
@@ -317,7 +357,7 @@ export function useStreamingSlice({
         abortCtrlRef.current = null;
       }
     },
-    [activeModel, abortCtrlRef, setIsStreaming, setStreamingContent, setStreamingError, setMessages],
+    [activeModel, abortCtrlRef, setIsStreaming, setStreamingContent, setStreamingError, setMessages, saveConversationToHistory, currentConvId, currentSystemPrompt, currentSystemPromptId, setCurrentConvId],
   );
 
   const refineImagePrompt = useCallback(
@@ -422,7 +462,6 @@ export function useStreamingSlice({
         let generatedB64: string | null = null;
         for await (const chunk of streamImageGeneration(imageBody, signal)) {
           if (chunk.error) {
-            // Detect Ollama's "not supported" error for image generation
             if (chunk.error.includes('not currently supported') || chunk.error.includes('image generation')) {
               throw new Error(
                 'Image generation is not available. Ollama removed experimental image generation in v0.32.6+. ' +
@@ -525,26 +564,70 @@ export function useStreamingSlice({
         pendingImages.length > 0 || pendingFiles.length > 0 || pendingAudio.length > 0;
       if (!text && !hasPending) return;
 
-      // ── Slash commands for project features ─────────────────────
       if (text && activeProjectId) {
         const slashMatch = text.match(/^\/(research|document|doc|code|data|workflow)\s+(.+)/i);
         if (slashMatch) {
           const cmd = slashMatch[1].toLowerCase();
           const arg = slashMatch[2].trim();
-          // Show user message in chat
           const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
           setMessages((prev) => [...prev, userMsg]);
           setPendingImages([]);
           setPendingFiles([]);
           setPendingAudio([]);
-          // Dispatch to appropriate handler
           await handleSlashCommand(cmd, arg, activeProjectId);
           return;
         }
       }
-      // ────────────────────────────────────────────────────────────
 
-      // Fast regex check: obvious image commands skip intent classification entirely
+      if (text) {
+        const buildMatch = text.match(/^\/build\s+(.+)/i);
+        if (buildMatch) {
+          const description = buildMatch[1].trim();
+          const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
+          setMessages((prev) => [...prev, userMsg]);
+          setPendingImages([]);
+          setPendingFiles([]);
+          setPendingAudio([]);
+          setIsStreaming(true);
+          setStreamingContent('🔨 Building tool: ' + description + '...');
+          setStreamingError(null);
+          try {
+            const resp = await fetch('/api/tools/build', {
+              method: 'POST',
+              headers: authHeaders({ 'Content-Type': 'application/json' }),
+              body: JSON.stringify({ description, model: activeModel }),
+            });
+            const result = await resp.json();
+            const assistantMsg: Message = {
+              role: 'assistant',
+              content: result.ok
+                ? `✔ Tool **${result.name}** has been built and is ready to use!\n\n${result.description || description}`
+                : `⚠️ Failed to build tool: ${result.error || 'Unknown error'}`,
+              timestamp: Date.now(),
+            };
+            setMessages((prev) => {
+              const updated = [...prev, assistantMsg];
+              saveConversationToHistory(
+                updated,
+                currentConvId,
+                activeModel,
+                currentSystemPrompt,
+                currentSystemPromptId,
+              ).then((newId) => {
+                if (newId) setCurrentConvId(newId);
+              });
+              return updated;
+            });
+          } catch (err: unknown) {
+            setStreamingError(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
+          } finally {
+            setIsStreaming(false);
+            setStreamingContent('');
+          }
+          return;
+        }
+      }
+
       if (text && !hasPending && getSettings().imageGeneration && isImageRequest(text)) {
         const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
         const nextMsgs = [...messages, userMsg];
@@ -556,19 +639,13 @@ export function useStreamingSlice({
         return;
       }
 
-      // ── Intent-based model routing ───────────────────────────────
-      // If the user configured an intent model, classify the message
-      // to pick the best model before streaming the full reply.
       let modelOverride: string | undefined;
-      let detectedIntent: 'image' | 'code' | 'text' | 'search' | undefined;
+      let detectedIntent: 'image' | 'code' | 'text' | 'search' | 'research' | 'document' | undefined;
       const { intentModel, codeModel, webSearch: webSearchEnabled } = getSettings();
-      console.log('[intent] settings:', { intentModel, codeModel, activeModel, webSearchEnabled });
 
-      // Fast client-side code check — catches obvious programming requests without an AI call
       if (text && !hasPending && codeModel && isCodeRequest(text)) {
         modelOverride = codeModel;
         detectedIntent = 'code';
-        console.log('[intent] fast code regex match, using codeModel:', codeModel);
       } else if (text && !hasPending && intentModel) {
         abortCtrlRef.current = new AbortController();
         const intent = await classifyIntent(text, intentModel, abortCtrlRef.current.signal).catch(
@@ -577,10 +654,8 @@ export function useStreamingSlice({
         if (abortCtrlRef.current?.signal.aborted) return;
         abortCtrlRef.current = null;
         detectedIntent = intent;
-        console.log('[intent] classified as:', intent, '| codeModel:', codeModel);
 
         if (intent === 'image' && getSettings().imageGeneration) {
-          // AI confirmed image intent — route to image generation
           const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
           const nextMsgs = [...messages, userMsg];
           setMessages(nextMsgs);
@@ -590,14 +665,21 @@ export function useStreamingSlice({
           await handleImageRequest(text, nextMsgs, currentConvId);
           return;
         }
+        if ((intent === 'research' || intent === 'document') && activeProjectId) {
+          const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
+          setMessages((prev) => [...prev, userMsg]);
+          setPendingImages([]);
+          setPendingFiles([]);
+          setPendingAudio([]);
+          const cmd = intent === 'research' ? 'research' : 'document';
+          await handleSlashCommand(cmd, text, activeProjectId);
+          return;
+        }
         if (intent === 'code' && codeModel) {
           modelOverride = codeModel;
         }
-        // 'text' or 'search' → use activeModel (no override)
       }
-      // ────────────────────────────────────────────────────────────
 
-      // Build message content with attachments
       let fullContent = text;
 
       if (pendingFiles.length) {
@@ -638,36 +720,29 @@ export function useStreamingSlice({
       setPendingFiles([]);
       setPendingAudio([]);
 
-      // ── Web search ─────────────────────────────────────────────
-      // If web search is enabled and intent is 'search' (or always-on when no intent model),
-      // perform a web search and inject results as context.
       let searchContext: string | undefined;
       let searchResults: import('../../types').SearchResult[] | undefined;
+      const fastSearchMatch = text ? isSearchRequest(text) : false;
       const shouldSearch = webSearchEnabled && (
+        fastSearchMatch ||
         detectedIntent === 'search' ||
-        (!intentModel && text) // No intent model → always search when web search toggle is on
+        (!intentModel && text)
       );
 
       if (shouldSearch && text) {
-        console.log('[webSearch] performing search for:', text.slice(0, 100));
         setStreamingContent('🔍 Searching the web…');
         setIsStreaming(true);
         const results = await webSearch(text, 5, abortCtrlRef.current?.signal);
         if (results.length > 0) {
           searchResults = results;
-          // Keep search context concise to avoid filling the model's context window
           searchContext = results
             .map((r, i) => `[${i + 1}] ${r.title}: ${r.body.slice(0, 150)}\nURL: ${r.href}`)
             .join('\n')
-            .slice(0, 2000); // Hard cap at 2000 chars
-          console.log('[webSearch] got', results.length, 'results');
-        } else {
-          console.log('[webSearch] no results found');
+            .slice(0, 2000);
         }
         setStreamingContent('');
         setIsStreaming(false);
       }
-      // ────────────────────────────────────────────────────────────
 
       const replyText = await streamAssistantReply(nextMsgs, currentConvId, modelOverride, searchContext);
 

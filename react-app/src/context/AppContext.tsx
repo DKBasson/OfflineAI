@@ -28,8 +28,6 @@ import { useUISlice } from './hooks/useUISlice';
 import { useStreamingSlice } from './hooks/useStreamingSlice';
 import { useProjectsSlice } from './hooks/useProjectsSlice';
 
-// ── Context types ─────────────────────────────────────
-
 interface AppState {
   messages: Message[];
   pendingImages: PendingImage[];
@@ -138,12 +136,9 @@ export function useApp(): AppContextValue {
   return ctx;
 }
 
-// ── Provider ──────────────────────────────────────────
-
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const initialSettings = loadSettings();
 
-  // ── State ─────────────────────────────────────────────
   const [messages, setMessages] = useState<Message[]>([]);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
@@ -182,15 +177,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [isProjectsPanelOpen, setIsProjectsPanelOpen] = useState(false);
 
-  // ── Refs ──────────────────────────────────────────────
   const historyDbRef = useRef<IDBDatabase | null>(null);
   const abortCtrlRef = useRef<AbortController | null>(null);
   const streamTextRef = useRef('');
   const ollamaStatusRef = useRef<Record<string, unknown>>({});
   const modelCapsRef = useRef<Record<string, { vision: boolean }>>({});
   const settingsRef = useRef<Settings>(initialSettings);
-
-  // ── Slice hooks (order matters: lower slices depend on higher) ────────────
 
   const prompts = usePromptsSlice({
     currentSystemPromptId,
@@ -298,8 +290,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsProjectsPanelOpen,
   });
 
-  // ── Initialization ────────────────────────────────────
-
   useEffect(() => {
     consumeUrlToken();
 
@@ -330,10 +320,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Context value ─────────────────────────────────────
-
   const value: AppContextValue = {
-    // state
     messages,
     pendingImages,
     pendingFiles,
@@ -367,23 +354,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ollamaRestartStatus,
     modelHealth,
     savedPromptsVersion,
-    // projects state
     projects,
     activeProject,
     projectFiles,
     isProjectsPanelOpen,
-    // streaming actions
     sendMessage: streaming.sendMessage,
     stopStreaming: streaming.stopStreaming,
     regenerateLastResponse: streaming.regenerateLastResponse,
-    // history actions
     startNewChat: hist.startNewChat,
     loadConversation: hist.loadConversation,
     deleteConversation: hist.deleteConversation,
     clearAllHistory: hist.clearAllHistory,
     exportConversation: hist.exportConversation,
     setHistorySearchTerm,
-    // model actions
     setActiveModel: models_.setActiveModel,
     refreshConnectionStatus: models_.refreshConnectionStatus,
     refreshModels: models_.refreshModels,
@@ -392,7 +375,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     pullModel: models_.pullModel,
     pullImageModel: models_.pullImageModel,
     restartOllama: models_.restartOllama,
-    // prompt actions
     setSystemPromptById: prompts.setSystemPromptById,
     getSavedPrompts: prompts.getSavedPrompts,
     savePrompt: prompts.savePrompt,
@@ -400,7 +382,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     reorderPrompts: prompts.reorderPrompts,
     duplicatePrompt: prompts.duplicatePrompt,
     setDefaultPrompt: prompts.setDefaultPrompt,
-    // ui / file actions
     openSettings: ui.openSettings,
     closeSettings: ui.closeSettings,
     saveSettingsValues: ui.saveSettingsValues,
@@ -417,7 +398,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setShortcutsOpen: ui.setShortcutsOpen,
     setDragActive: ui.setDragActive,
     resetTokenCounter: ui.resetTokenCounter,
-    // projects actions
     refreshProjects: projectsSlice.refreshProjects,
     createNewProject: projectsSlice.createNewProject,
     removeProject: projectsSlice.removeProject,

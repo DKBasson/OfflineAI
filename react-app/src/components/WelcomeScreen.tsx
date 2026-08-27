@@ -7,8 +7,6 @@ export function WelcomeScreen() {
   const greeting = activeUsername ? `Hello, ${activeUsername}` : 'OfflineAI';
 
   const handleTemplate = (template: typeof CONVERSATION_TEMPLATES[number]) => {
-    // Send the template's starter prompt as the first user message.
-    // The system prompt context is woven into the message naturally.
     sendMessage(template.systemPrompt + '\n\nPlease greet the user with: "' + template.starterMessage + '"');
   };
 

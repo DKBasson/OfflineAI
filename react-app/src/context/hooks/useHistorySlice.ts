@@ -23,7 +23,6 @@ export interface HistorySliceDeps {
   setCurrentSystemPrompt: React.Dispatch<React.SetStateAction<string>>;
   setCurrentSystemPromptId: React.Dispatch<React.SetStateAction<string>>;
   setIsSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  // Cross-slice deps
   applyDefaultSystemPrompt: () => boolean;
   setSystemPromptById: (id: string) => void;
   fetchAndSetTokens: (username?: string) => Promise<void>;
