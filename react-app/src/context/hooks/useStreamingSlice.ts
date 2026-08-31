@@ -95,6 +95,12 @@ export function useStreamingSlice({
 }: StreamingSliceDeps) {
   const getSettings = useCallback(() => settingsRef.current, [settingsRef]);
 
+  /** Return the code-specific model if set in Settings, otherwise the active chat model. */
+  const getCodeModel = useCallback(() => {
+    const { codeModel } = getSettings();
+    return codeModel || activeModel;
+  }, [getSettings, activeModel]);
+
   const streamingErrorRef = useRef<string | null>(null);
 
   const lastResponseTokensRef = useRef(0);
@@ -264,7 +270,7 @@ export function useStreamingSlice({
             break;
           case 'code':
             endpoint = `/api/projects/${encodeURIComponent(projectId)}/code/plan`;
-            body = { description: arg, model: activeModel };
+            body = { description: arg, model: getCodeModel() };
             break;
           case 'data':
             endpoint = `/api/projects/${encodeURIComponent(projectId)}/generate-data`;
@@ -443,7 +449,7 @@ export function useStreamingSlice({
           {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ model: activeModel }),
+            body: JSON.stringify({ model: getCodeModel() }),
             signal: abortCtrlRef.current.signal,
           },
         );
@@ -497,7 +503,7 @@ export function useStreamingSlice({
         finalizeArtifact();
       }
     },
-    [activeModel, abortCtrlRef, setIsStreaming, setStreamingContent, setStreamingError, openArtifactCanvas, updateArtifactContent, finalizeArtifact, setSpecPhase],
+    [getCodeModel, abortCtrlRef, setIsStreaming, setStreamingContent, setStreamingError, openArtifactCanvas, updateArtifactContent, finalizeArtifact, setSpecPhase],
   );
 
   const refineImagePrompt = useCallback(
@@ -935,8 +941,8 @@ export function useStreamingSlice({
                   ? `/api/projects/${encodeURIComponent(activeProjectId)}/code/generate`
                   : `/api/projects/${encodeURIComponent(activeProjectId)}/code/edit`;
                 const codeBody = isPlanned
-                  ? { model: activeModel, answers: [text] }
-                  : { instruction: text, model: activeModel };
+                  ? { model: getCodeModel(), answers: [text] }
+                  : { instruction: text, model: getCodeModel() };
                 const editResp = await fetch(
                   codeEndpoint,
                   {

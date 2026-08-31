@@ -42,6 +42,7 @@ export function Sidebar() {
 
   const filtered = historySearchTerm
     ? history.filter((item) => {
+        if (item.projectId) return false; // Project chats only show in Projects panel
         const haystack = [
           item.title,
           item.model || FALLBACK_MODEL,
@@ -51,7 +52,7 @@ export function Sidebar() {
           .toLowerCase();
         return haystack.includes(historySearchTerm.toLowerCase());
       })
-    : history;
+    : history.filter((item) => !item.projectId);
 
   return (
     <>

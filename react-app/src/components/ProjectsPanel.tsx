@@ -17,6 +17,9 @@ export function ProjectsPanel() {
     sendMessage,
     specPhase,
     resumeSpec,
+    history,
+    loadConversation,
+    deleteConversation,
   } = useApp();
 
   const [search, setSearch] = useState('');
@@ -144,6 +147,40 @@ export function ProjectsPanel() {
             )}
           </div>
         )}
+
+        {/* Project conversations */}
+        {activeProject && (() => {
+          const projectChats = history.filter((c) => c.projectId === activeProject.id);
+          if (projectChats.length === 0) return null;
+          return (
+            <div className="border-b border-border shrink-0">
+              <div className="px-3 pt-2 pb-1 text-[11px] text-text-dim font-medium">
+                Project chats ({projectChats.length})
+              </div>
+              <div className="px-2 pb-2 max-h-[120px] overflow-y-auto">
+                {projectChats.map((chat) => (
+                  <div
+                    key={chat.id}
+                    className="group flex items-center gap-1.5 px-2 py-1.5 rounded-[7px] hover:bg-surface-md cursor-pointer transition-colors"
+                  >
+                    <div
+                      className="flex-1 min-w-0"
+                      onClick={() => { loadConversation(chat); closeProjectsPanel(); }}
+                    >
+                      <div className="text-[12px] text-text-primary truncate">{chat.title}</div>
+                      <div className="text-[10px] text-text-dim">{new Date(chat.timestamp).toLocaleDateString()}</div>
+                    </div>
+                    <button
+                      className="shrink-0 opacity-0 group-hover:opacity-100 text-text-dim hover:text-text-primary text-[10px] transition-opacity"
+                      onClick={(e) => { e.stopPropagation(); deleteConversation(chat.id); }}
+                      aria-label="Delete"
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Create form */}
         {showCreate && (

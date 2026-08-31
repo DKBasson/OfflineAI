@@ -42,6 +42,7 @@ export interface Conversation {
   systemPrompt?: string;
   systemPromptId?: string;
   branches?: ConversationBranch[];
+  projectId?: string;
 }
 
 export interface SystemPrompt {

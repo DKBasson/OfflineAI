@@ -267,6 +267,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isStreaming,
     activeModel,
     activeUsername,
+    activeProjectId: activeProject?.id ?? null,
     messages,
     historyDbRef,
     settingsRef,
@@ -369,12 +370,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const executeOneTask = useCallback(async (projectId: string, taskId: string, allFiles: string[]): Promise<{ ok: boolean; files: string[] }> => {
     const { authHeaders } = await import('../utils/api');
+    const codeModel = settingsRef.current.codeModel || activeModel;
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/code/task/execute`,
       {
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ task_id: taskId, model: activeModel }),
+        body: JSON.stringify({ task_id: taskId, model: codeModel }),
       },
     );
 
@@ -395,15 +397,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (!line.startsWith('data: ')) continue;
         try {
           const evt = JSON.parse(line.slice(6));
-          if (evt.type === 'file' && evt.path) {
+          if (evt.type === 'status') {
+            setStreamingContent((prev) => prev + (prev ? '\n' : '') + evt.message);
+          } else if (evt.type === 'token') {
+            // Show generation progress in streaming content
+            setStreamingContent((prev) => {
+              // Keep status lines, add a generation indicator
+              const statusLines = prev.split('\n').filter(l => !l.startsWith('  '));
+              return statusLines.join('\n');
+            });
+          } else if (evt.type === 'file' && evt.path) {
             files.push(evt.path);
             updateArtifactFiles([...files]);
+            setStreamingContent((prev) => prev + `\n📄 Generated: ${evt.path}`);
           } else if (evt.type === 'task_complete') {
+            setStreamingContent((prev) => prev + `\n✔ Task ${taskId} completed`);
             // Mark checkbox in displayed content
             setArtifactCanvas((prev) => {
               const escaped = taskId.replace('.', '\\.');
               const updated = prev.content.replace(
-                new RegExp(`(^\\s*[-*]\\s*)\\[[ ]\\](\\s*${escaped}[.)])`, 'm'),
+                new RegExp(`(^\\s*[-*]\\s*)\\[[ ⏳]\\](\\s*${escaped}[.)])`, 'm'),
                 '$1[x]$2',
               );
               return { ...prev, content: updated };
@@ -416,13 +429,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
     return { ok: true, files };
-  }, [activeModel, updateArtifactFiles, setArtifactCanvas]);
+  }, [activeModel, updateArtifactFiles, setArtifactCanvas, setStreamingContent]);
 
   const executeSpecTask = useCallback(async (_taskIdOrAll: string) => {
     if (!activeProject) return;
     setSpecPhase('executing');
     setArtifactCanvas((prev) => ({ ...prev, isStreaming: true }));
+    setIsStreaming(true);
+    setStreamingContent('🚀 Starting task execution...');
+    setStreamingError(null);
 
+    let allFiles: string[] = [];
     try {
       // Get the task list from current content
       const { fetchSpecState } = await import('../utils/api');
@@ -439,9 +456,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const remaining = allTasks.filter(t => !t.done);
       if (remaining.length === 0) return;
 
-      let allFiles: string[] = [];
+      setStreamingContent((prev) => prev + `\n📋 ${remaining.length} tasks to execute`);
 
       for (const task of remaining) {
+        // Show progress in chat
+        setStreamingContent((prev) => prev + `\n\n⏳ Task ${task.id}: ${task.title}...`);
         // Update the UI to show which task is running
         setArtifactCanvas((prev) => ({ ...prev, isStreaming: true }));
         // Signal ArtifactCanvas about current task via a marker in content
@@ -459,17 +478,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         allFiles = result.files;
 
         if (!result.ok) {
-          console.error(`Task ${task.id} failed, stopping execution`);
+          setStreamingContent((prev) => prev + `\n\n⚠️ Task ${task.id} failed, stopping execution`);
           break;
         }
       }
     } catch (err) {
       console.error('Task execution error:', err);
+      setStreamingError(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setSpecPhase('ready');
+      setIsStreaming(false);
+      setStreamingContent('');
       setArtifactCanvas((prev) => ({ ...prev, isStreaming: false }));
+
+      // Add a completion message to the chat
+      const completedCount = allFiles.length;
+      if (completedCount > 0) {
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content: `✔ Task execution complete. ${completedCount} file${completedCount !== 1 ? 's' : ''} generated.`,
+          timestamp: Date.now(),
+          intent: 'code',
+          generatedFiles: allFiles,
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      }
     }
-  }, [activeProject, executeOneTask, setArtifactCanvas]);
+  }, [activeProject, executeOneTask, setArtifactCanvas, setIsStreaming, setStreamingContent, setStreamingError, setMessages]);
 
   const resumeSpec = useCallback(async () => {
     if (!activeProject) return;

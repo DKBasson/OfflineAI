@@ -12,6 +12,7 @@ export interface HistorySliceDeps {
   isStreaming: boolean;
   activeModel: string;
   activeUsername: string;
+  activeProjectId: string | null;
   messages: Message[];
   historyDbRef: MutableRefObject<IDBDatabase | null>;
   settingsRef: MutableRefObject<Settings>;
@@ -34,6 +35,7 @@ export function useHistorySlice({
   isStreaming,
   activeModel,
   activeUsername,
+  activeProjectId,
   messages,
   historyDbRef,
   settingsRef,
@@ -88,6 +90,7 @@ export function useHistorySlice({
         messages: stripped,
         systemPrompt,
         systemPromptId,
+        ...(activeProjectId ? { projectId: activeProjectId } : {}),
       };
       const idx = allHistory.findIndex((h) => h.id === id);
       if (idx >= 0) allHistory[idx] = entry;
@@ -120,6 +123,7 @@ export function useHistorySlice({
       historyRef,
       getSettings,
       activeUsername,
+      activeProjectId,
       persistHistory,
       fetchAndSetTokens,
       historyDbRef,
