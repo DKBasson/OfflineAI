@@ -97,6 +97,11 @@ export function Sidebar() {
             onChange={(e) => setHistorySearchTerm(e.target.value)}
             className="w-full bg-transparent border border-border rounded-[9px] text-text-primary font-[inherit] text-[13px] px-2.5 py-2 outline-none focus:border-border-hi focus:bg-surface placeholder:text-text-dim"
           />
+          {historySearchTerm && (
+            <span className="text-[11px] text-text-dim mt-1 block">
+              {filtered.length} of {history.length} conversation{history.length !== 1 ? 's' : ''} matched
+            </span>
+          )}
         </div>
 
         {/* List */}

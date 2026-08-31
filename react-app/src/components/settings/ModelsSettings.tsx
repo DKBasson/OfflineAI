@@ -1,4 +1,16 @@
+import { useState } from 'react';
 import type { Settings } from '../../types';
+
+/** Extract percentage from pull status text like "pulling abc — 45%" */
+function parsePullProgress(status: string): number | null {
+  const match = status.match(/(\d+)%/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+/** Extract the downloading model name from the input field */
+function extractPullingModel(_status: string, inputName: string): string {
+  return inputName.trim() || 'model';
+}
 
 interface ModelsSettingsProps {
   form: Settings;
@@ -36,6 +48,10 @@ export function ModelsSettings({
       : pullStatus.startsWith('Error') || pullStatus.toLowerCase().includes('error')
         ? 'error'
         : '';
+
+  const pullProgress = parsePullProgress(pullStatus);
+  const pullImageProgress = parsePullProgress(pullImageStatus);
+  const [showImageAdvanced, setShowImageAdvanced] = useState(false);
 
   return (
     <>
@@ -82,6 +98,20 @@ export function ModelsSettings({
           >
             {pullStatus}
           </p>
+          {pullProgress != null && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[11px] text-text-muted mb-1">
+                <span>Downloading {extractPullingModel(pullStatus, pullModelInput)}…</span>
+                <span>{pullProgress}%</span>
+              </div>
+              <div className="h-1.5 bg-surface-md rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-accent rounded-full transition-all duration-300"
+                  style={{ width: `${pullProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -209,18 +239,30 @@ export function ModelsSettings({
             </select>
           </div>
           <div>
-            <label className="settings-label">Performance profile</label>
-            <select
-              className="settings-input"
-              value={form.imagePerfProfile}
-              onChange={(e) =>
-                setField('imagePerfProfile', e.target.value as Settings['imagePerfProfile'])
-              }
+            <button
+              type="button"
+              className="flex items-center gap-1.5 text-[12px] text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+              onClick={() => setShowImageAdvanced(!showImageAdvanced)}
             >
-              <option value="eco">Eco — 640 px · 6 steps · fast</option>
-              <option value="balanced">Balanced — 768 px · 10 steps</option>
-              <option value="quality">Quality — 1024 px · 16 steps · slow</option>
-            </select>
+              <span className={`inline-block transition-transform duration-150 ${showImageAdvanced ? 'rotate-90' : ''}`}>▸</span>
+              Advanced image settings
+            </button>
+            {showImageAdvanced && (
+              <div className="mt-2">
+                <label className="settings-label">Performance profile</label>
+                <select
+                  className="settings-input"
+                  value={form.imagePerfProfile}
+                  onChange={(e) =>
+                    setField('imagePerfProfile', e.target.value as Settings['imagePerfProfile'])
+                  }
+                >
+                  <option value="eco">Eco — 640 px · 6 steps · fast</option>
+                  <option value="balanced">Balanced — 768 px · 10 steps</option>
+                  <option value="quality">Quality — 1024 px · 16 steps · slow</option>
+                </select>
+              </div>
+            )}
           </div>
           <div>
             <label className="settings-label">Download image model</label>
@@ -257,6 +299,20 @@ export function ModelsSettings({
               >
                 {pullImageStatus}
               </p>
+            )}
+            {pullImageProgress != null && (
+              <div className="mt-2">
+                <div className="flex items-center justify-between text-[11px] text-text-muted mb-1">
+                  <span>Downloading {extractPullingModel(pullImageStatus, pullImageInput)}…</span>
+                  <span>{pullImageProgress}%</span>
+                </div>
+                <div className="h-1.5 bg-surface-md rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-accent rounded-full transition-all duration-300"
+                    style={{ width: `${pullImageProgress}%` }}
+                  />
+                </div>
+              </div>
             )}
           </div>
         </div>

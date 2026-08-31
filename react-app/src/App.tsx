@@ -11,6 +11,7 @@ import { Lightbox } from './components/Lightbox';
 import { DragOverlay } from './components/DragOverlay';
 import { ProjectsPanel } from './components/ProjectsPanel';
 import ArtifactCanvas from './components/ArtifactCanvas';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function AppInner() {
   const {
@@ -34,6 +35,9 @@ function AppInner() {
     artifactCanvas,
     closeArtifactCanvas,
     activeProject,
+    specPhase,
+    approveAndContinue,
+    executeSpecTask,
   } = useApp();
 
   const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
@@ -116,6 +120,7 @@ function AppInner() {
 
   return (
     <div className="flex flex-col h-[100dvh] overflow-hidden bg-bg text-text-primary font-sans">
+      <a href="#input" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-3 focus:py-1 focus:rounded focus:bg-accent focus:text-white">Skip to message input</a>
       <Sidebar />
       <SettingsPanel />
       <ProjectsPanel />
@@ -125,12 +130,15 @@ function AppInner() {
       <DragOverlay />
       <Header />
       <div className="flex flex-1 overflow-hidden">
-        <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300 ${artifactCanvas.isOpen ? 'mr-[50vw]' : ''}`}>
-          <ChatArea />
-          <MessageInput />
+        <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300 ${artifactCanvas.isOpen ? 'md:mr-[60vw] lg:mr-[50vw]' : ''}`}>
+          <ErrorBoundary fallbackMessage="Chat encountered an error">
+            <ChatArea />
+            <MessageInput />
+          </ErrorBoundary>
         </div>
       </div>
-      <ArtifactCanvas
+      <ErrorBoundary fallbackMessage="Artifact canvas encountered an error">
+        <ArtifactCanvas
         isOpen={artifactCanvas.isOpen}
         content={artifactCanvas.content}
         contentType={artifactCanvas.contentType}
@@ -138,8 +146,12 @@ function AppInner() {
         isStreaming={artifactCanvas.isStreaming}
         generatedFiles={artifactCanvas.generatedFiles}
         activeProjectId={activeProject?.id ?? null}
+        specPhase={specPhase}
+        onApprovePhase={approveAndContinue}
+        onExecuteTask={executeSpecTask}
         onClose={closeArtifactCanvas}
       />
+      </ErrorBoundary>
     </div>
   );
 }

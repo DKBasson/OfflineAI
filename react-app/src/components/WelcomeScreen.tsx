@@ -1,5 +1,5 @@
 import { useApp } from '../context/AppContext';
-import { CONVERSATION_TEMPLATES } from '../constants';
+import { CONVERSATION_TEMPLATES, CREATION_TEMPLATES } from '../constants';
 
 export function WelcomeScreen() {
   const { activeUsername, activeModel, sendMessage } = useApp();
@@ -24,9 +24,9 @@ export function WelcomeScreen() {
         Local · Private · No cloud
       </p>
 
-      {/* Conversation Templates */}
+      {/* Chat Templates */}
       <div className="mt-8 w-full max-w-md px-4">
-        <p className="text-[11px] text-text-dim uppercase tracking-wider mb-3">Quick start</p>
+        <p className="text-[11px] text-text-dim uppercase tracking-wider mb-3">Chat Templates</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {CONVERSATION_TEMPLATES.map((tpl) => (
             <button
@@ -38,6 +38,25 @@ export function WelcomeScreen() {
               <span className="text-lg">{tpl.icon}</span>
               <span className="text-[12px] text-text-primary font-medium">{tpl.name}</span>
             </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Creation Templates */}
+      <div className="mt-6 w-full max-w-md px-4">
+        <p className="text-[11px] text-text-dim uppercase tracking-wider mb-3">
+          Create with AI <span className="normal-case opacity-60">(requires a project)</span>
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {CREATION_TEMPLATES.map((tpl) => (
+            <div
+              key={tpl.id}
+              className="flex flex-col items-center gap-1.5 px-3 py-3 bg-surface border border-border rounded-lg text-center opacity-70 hover:opacity-100 transition-opacity cursor-default"
+              title={tpl.description}
+            >
+              <span className="text-lg">{tpl.icon}</span>
+              <span className="text-[12px] text-text-primary font-medium">{tpl.name}</span>
+            </div>
           ))}
         </div>
       </div>

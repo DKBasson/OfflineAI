@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import type { Conversation, Message, Settings } from '../../types';
 import { FALLBACK_MODEL } from '../../constants';
@@ -51,6 +51,9 @@ export function useHistorySlice({
 }: HistorySliceDeps) {
   const getSettings = useCallback(() => settingsRef.current, [settingsRef]);
 
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
   const persistHistory = useCallback(
     async (items: Conversation[]) => {
       const limit = getSettings().historyLimit;
@@ -70,7 +73,7 @@ export function useHistorySlice({
       systemPromptId: string,
     ) => {
       if (!msgs.length) return convId;
-      const allHistory = [...history];
+      const allHistory = [...historyRef.current];
       const isNew = !convId;
       const id = convId || String(Date.now());
       const stripped = msgs.map(({ images: _i, generatedImage: _g, ...rest }) => rest);
@@ -101,7 +104,7 @@ export function useHistorySlice({
               if (i >= 0) updated[i] = { ...updated[i], title: genTitle };
               return updated;
             });
-            const latest = history;
+            const latest = historyRef.current;
             const i = latest.findIndex((x) => x.id === id);
             if (i >= 0) {
               const updated = [...latest];
@@ -114,7 +117,7 @@ export function useHistorySlice({
       return id;
     },
     [
-      history,
+      historyRef,
       getSettings,
       activeUsername,
       persistHistory,

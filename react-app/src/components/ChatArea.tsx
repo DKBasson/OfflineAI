@@ -45,19 +45,22 @@ export function ChatArea() {
   }, [messages.length, chatSearchOpen]);
 
   useEffect(() => {
-    setChatSearchOpen(false);
-    setChatSearch('');
-  }, [messages.length === 0]);
+    if (messages.length === 0) {
+      setChatSearchOpen(false);
+      setChatSearch('');
+    }
+  }, [messages.length]);
+
+  const lastMsgContent = messages.length > 0 ? messages[messages.length - 1].content : '';
+  const lastMsgRole = messages.length > 0 ? messages[messages.length - 1].role : '';
 
   useEffect(() => {
     setFollowups([]);
-    if (messages.length >= 2 && !isStreaming) {
-      const last = messages[messages.length - 1];
-      if (last.role === 'assistant') {
-        fetchFollowups(activeModel, messages.map(m => ({ role: m.role, content: m.content }))).then(setFollowups);
-      }
+    if (messages.length >= 2 && !isStreaming && lastMsgRole === 'assistant') {
+      fetchFollowups(activeModel, messages.map(m => ({ role: m.role, content: m.content }))).then(setFollowups);
     }
-  }, [messages, isStreaming, activeModel]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, lastMsgContent, isStreaming, activeModel]);
 
   const matchCount = chatSearch
     ? messages.filter(m => m.content.toLowerCase().includes(chatSearch.toLowerCase())).length
@@ -70,6 +73,9 @@ export function ChatArea() {
       className="flex-1 overflow-y-auto px-4 py-4 flex flex-col"
       id="messages"
       aria-label="Chat messages"
+      role="log"
+      aria-live="polite"
+      aria-busy={isStreaming}
     >
       {showWelcome ? (
         <WelcomeScreen />

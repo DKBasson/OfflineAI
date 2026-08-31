@@ -15,6 +15,7 @@ import type {
   Project,
   ProjectFile,
   Settings,
+  SpecPhase,
   SystemPrompt,
   TokenStats,
 } from '../types';
@@ -81,6 +82,7 @@ interface AppState {
     isStreaming: boolean;
     generatedFiles: string[];
   };
+  specPhase: SpecPhase | null;
 }
 
 interface AppActions {
@@ -139,6 +141,10 @@ interface AppActions {
   updateArtifactFiles: (files: string[]) => void;
   closeArtifactCanvas: () => void;
   finalizeArtifact: () => void;
+  approveAndContinue: () => Promise<void>;
+  executeSpecTask: (taskId: string) => Promise<void>;
+  resumeSpec: () => Promise<void>;
+  setSpecPhase: React.Dispatch<React.SetStateAction<SpecPhase | null>>;
 }
 
 type AppContextValue = AppState & AppActions;
@@ -199,6 +205,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isStreaming: false,
     generatedFiles: [],
   });
+  const [specPhase, setSpecPhase] = useState<SpecPhase | null>(null);
 
   const historyDbRef = useRef<IDBDatabase | null>(null);
   const abortCtrlRef = useRef<AbortController | null>(null);
@@ -324,6 +331,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updateArtifactContent,
     updateArtifactFiles,
     finalizeArtifact,
+    setSpecPhase,
   });
 
   const projectsSlice = useProjectsSlice({
@@ -332,6 +340,181 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setProjectFiles,
     setIsProjectsPanelOpen,
   });
+
+  const approveAndContinue = useCallback(async () => {
+    if (!activeProject) return;
+    try {
+      const { approveSpecPhase: approveApi, fetchSpecState } = await import('../utils/api');
+      const result = await approveApi(activeProject.id);
+      if (result.ok && result.spec_phase) {
+        setSpecPhase(result.spec_phase as SpecPhase);
+        // Trigger next phase generation if needed
+        if (result.spec_phase === 'design' || result.spec_phase === 'tasks') {
+          streaming.handleSpecGenerate?.(activeProject.id, result.spec_phase);
+        }
+        // When reaching 'ready', show the tasks content in the canvas for execution
+        if (result.spec_phase === 'ready') {
+          const specState = await fetchSpecState(activeProject.id);
+          if (specState?.tasksMd) {
+            openArtifactCanvas({ title: 'Implementation Tasks', contentType: 'markdown' });
+            updateArtifactContent(specState.tasksMd);
+            finalizeArtifact();
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Approve phase failed:', err);
+    }
+  }, [activeProject, streaming, openArtifactCanvas, updateArtifactContent, finalizeArtifact]);
+
+  const executeOneTask = useCallback(async (projectId: string, taskId: string, allFiles: string[]): Promise<{ ok: boolean; files: string[] }> => {
+    const { authHeaders } = await import('../utils/api');
+    const resp = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/code/task/execute`,
+      {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ task_id: taskId, model: activeModel }),
+      },
+    );
+
+    if (!resp.ok) return { ok: false, files: allFiles };
+
+    const reader = resp.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const files = [...allFiles];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop()!;
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const evt = JSON.parse(line.slice(6));
+          if (evt.type === 'file' && evt.path) {
+            files.push(evt.path);
+            updateArtifactFiles([...files]);
+          } else if (evt.type === 'task_complete') {
+            // Mark checkbox in displayed content
+            setArtifactCanvas((prev) => {
+              const escaped = taskId.replace('.', '\\.');
+              const updated = prev.content.replace(
+                new RegExp(`(^\\s*[-*]\\s*)\\[[ ]\\](\\s*${escaped}[.)])`, 'm'),
+                '$1[x]$2',
+              );
+              return { ...prev, content: updated };
+            });
+          } else if (evt.type === 'error') {
+            console.error('Task error:', evt.error);
+            return { ok: false, files };
+          }
+        } catch { /* ignore */ }
+      }
+    }
+    return { ok: true, files };
+  }, [activeModel, updateArtifactFiles, setArtifactCanvas]);
+
+  const executeSpecTask = useCallback(async (_taskIdOrAll: string) => {
+    if (!activeProject) return;
+    setSpecPhase('executing');
+    setArtifactCanvas((prev) => ({ ...prev, isStreaming: true }));
+
+    try {
+      // Get the task list from current content
+      const { fetchSpecState } = await import('../utils/api');
+      const spec = await fetchSpecState(activeProject.id);
+      if (!spec?.tasksMd) return;
+
+      // Parse tasks from the markdown
+      const allTasks: { id: string; title: string; done: boolean }[] = [];
+      for (const line of spec.tasksMd.split('\n')) {
+        const m = line.match(/^\s*[-*]\s*\[([ xX])\]\s*(\d+(?:\.\d+)?)[.)]\s*(.+)/);
+        if (m) allTasks.push({ id: m[2], title: m[3].trim(), done: m[1].toLowerCase() === 'x' });
+      }
+
+      const remaining = allTasks.filter(t => !t.done);
+      if (remaining.length === 0) return;
+
+      let allFiles: string[] = [];
+
+      for (const task of remaining) {
+        // Update the UI to show which task is running
+        setArtifactCanvas((prev) => ({ ...prev, isStreaming: true }));
+        // Signal ArtifactCanvas about current task via a marker in content
+        setArtifactCanvas((prev) => {
+          // Add a running indicator
+          const escaped = task.id.replace('.', '\\.');
+          const updated = prev.content.replace(
+            new RegExp(`(^\\s*[-*]\\s*)\\[[ ]\\](\\s*${escaped}[.)])`, 'm'),
+            '$1[⏳]$2',
+          );
+          return { ...prev, content: updated };
+        });
+
+        const result = await executeOneTask(activeProject.id, task.id, allFiles);
+        allFiles = result.files;
+
+        if (!result.ok) {
+          console.error(`Task ${task.id} failed, stopping execution`);
+          break;
+        }
+      }
+    } catch (err) {
+      console.error('Task execution error:', err);
+    } finally {
+      setSpecPhase('ready');
+      setArtifactCanvas((prev) => ({ ...prev, isStreaming: false }));
+    }
+  }, [activeProject, executeOneTask, setArtifactCanvas]);
+
+  const resumeSpec = useCallback(async () => {
+    if (!activeProject) return;
+    try {
+      const { fetchSpecState } = await import('../utils/api');
+      const spec = await fetchSpecState(activeProject.id);
+      if (!spec) return;
+
+      setSpecPhase(spec.phase);
+
+      // Determine which content to show based on current phase
+      const phaseContentMap: Record<string, { content: string; title: string }> = {
+        requirements: { content: spec.requirementsMd, title: 'Requirements (generating…)' },
+        requirements_review: { content: spec.requirementsMd, title: 'Requirements' },
+        design: { content: spec.designMd || spec.requirementsMd, title: 'Design (generating…)' },
+        design_review: { content: spec.designMd, title: 'Design' },
+        tasks: { content: spec.tasksMd || spec.designMd, title: 'Tasks (generating…)' },
+        tasks_review: { content: spec.tasksMd, title: 'Tasks' },
+        ready: { content: spec.tasksMd, title: 'Implementation Tasks' },
+        executing: { content: spec.tasksMd, title: 'Implementation Tasks' },
+        active: { content: spec.tasksMd, title: 'Implementation Tasks' },
+      };
+
+      const mapped = phaseContentMap[spec.phase] || { content: spec.requirementsMd, title: 'Spec' };
+
+      // Open canvas with the right content
+      openArtifactCanvas({ title: mapped.title, contentType: 'markdown' });
+      updateArtifactContent(mapped.content);
+      finalizeArtifact(); // Not streaming — show immediately
+
+      // If tasks are done, update checkboxes
+      if (spec.tasksCompleted.length > 0 && mapped.content) {
+        let updated = mapped.content;
+        for (const taskId of spec.tasksCompleted) {
+          updated = updated.replace(
+            new RegExp(`^([-*]\\s*)\\[[ ]\\](\\s*${taskId.replace('.', '\\.')}\\.)`, 'm'),
+            '$1[x]$2',
+          );
+        }
+        updateArtifactContent(updated);
+      }
+    } catch (err) {
+      console.error('Resume spec failed:', err);
+    }
+  }, [activeProject, openArtifactCanvas, updateArtifactContent, finalizeArtifact]);
 
   useEffect(() => {
     consumeUrlToken();
@@ -456,6 +639,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updateArtifactFiles,
     closeArtifactCanvas,
     finalizeArtifact,
+    specPhase,
+    setSpecPhase,
+    approveAndContinue,
+    executeSpecTask,
+    resumeSpec,
   } as AppContextValue;
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

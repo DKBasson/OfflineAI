@@ -54,6 +54,22 @@ Built with [Ollama](https://ollama.com), FastAPI, and a React/TypeScript fronten
 - **Structured data generation** — generate CSV and JSON datasets
 - **Multi-step workflows** — LLM plans steps from natural language, chains research → document → code → data autonomously
 
+### Spec-Driven Code Workflow
+- **Three-phase specs** — `/code` generates structured specifications before writing any code: Requirements (EARS user stories with acceptance criteria) → Design (architecture, components, interfaces, data models) → Tasks (phased implementation plan with requirement traceability)
+- **EARS requirements** — user stories with acceptance criteria using EARS notation (WHEN/IF/WHILE/WHERE…THEN…SHALL), non-functional requirements, constraints, and success criteria
+- **Technical design** — architecture overview, technology stack table, component interfaces, data models, API endpoint specs, security considerations, error handling
+- **Task breakdown** — phased implementation tasks with checkboxes, subtasks linked to requirements (`_Requirements: [X.X]_`), and testing integrated into each task
+- **Phase-by-phase approval** — review each spec document before proceeding; edit and reapprove at any stage. Progress bar shows Requirements → Design → Tasks → Ready
+- **Task-by-task execution** — execute implementation tasks sequentially with real-time progress; checkboxes update as tasks complete
+- **Steering documents** — auto-generated `product.md`, `tech.md`, and `structure.md` provide persistent project context for all AI interactions
+- **Agent hooks** — event-driven automations that trigger on file changes or task completion (e.g., "update tests when a component changes", "validate code against standards")
+- **Resume specs** — spec sessions persist to disk and survive server restarts; resume from the Projects panel at any time
+- **Import existing code** — point to a folder on your machine; AI scans the codebase (up to 200 files), generates understanding document and steering docs, and enters edit mode
+- **Iterative editing** — after generation, send messages in the main chat to request changes; AI reads all project files, applies changes, and shows a summary of what changed
+- **Version tracking** — every edit saves a version of the previous file state, with up to 5 versions per file
+- **Click-to-preview** — click any generated file to preview its content with syntax highlighting
+- **Download All (ZIP)** — download the entire generated project as a ZIP file
+
 ### Tools / Plugins
 - **Custom AI tools** — build tools from natural language descriptions, auto-built using LLM + web research
 - **Tool management** — test, enable, disable, and delete tools from the UI
@@ -256,8 +272,40 @@ Enable **Web search** in Settings → General → Behavior. When enabled:
 
 ```
 OfflineAI/
-├── app.py              # FastAPI backend — serves UI, proxies Ollama, research agent
+├── app.py              # FastAPI composition root (146 lines — mounts routes, wires services)
+├── services/           # Backend service layer (18 modules)
+│   ├── config.py           # Centralised configuration and environment variables
+│   ├── tokens.py           # Token usage tracking and statistics
+│   ├── system.py           # System health and diagnostics
+│   ├── memory.py           # Persistent user memory/preferences
+│   ├── projects.py         # Research project CRUD and file operations
+│   ├── tools.py            # Tool/plugin registry and lifecycle
+│   ├── research.py         # Two-phase research pipeline (plan → execute)
+│   ├── media.py            # Audio transcription and document extraction
+│   ├── ollama.py           # Ollama client and model management
+│   ├── sandbox.py          # RestrictedPython 3-layer tool sandbox
+│   ├── queue.py            # Operation queue with asyncio.Semaphore(1)
+│   ├── prompt_assembly.py  # Clean prompt construction (memory, knowledge, tools)
+│   ├── knowledge_store.py  # SQLite FTS5 per-project knowledge retrieval
+│   ├── versions.py         # Artifact version history (.versions/, 5-version limit)
+│   ├── code_session.py     # Interactive code session management (spec phases, task tracking)
+│   ├── steering.py         # Steering document generation and management
+│   └── hooks.py            # Event-driven automation hooks
+├── routes/             # FastAPI route modules (12 modules)
+│   ├── ui.py               # Frontend serving and static files
+│   ├── models.py           # Model listing, pull, show, queue status
+│   ├── chat.py             # Chat completions (streaming)
+│   ├── tokens.py           # Token tracking endpoints
+│   ├── media.py            # Transcription, extraction, image generation
+│   ├── projects.py         # Project CRUD, files, knowledge, versions
+│   ├── generation.py       # Research, document, code, data, workflow generation
+│   ├── code.py             # Code import, analysis, and change planning
+│   ├── tools.py            # Tool build, execute, toggle, preview
+│   ├── memory.py           # Memory CRUD
+│   ├── hooks.py            # Project hook management
+│   └── portability.py      # Export/import archive
 ├── requirements.txt    # Python dependencies
+├── requirements-dev.txt # Test dependencies (pytest, etc.)
 ├── token_stats.json    # Persisted token counters (auto-created)
 ├── scripts/
 │   ├── install.sh      # One-time setup (macOS/Linux)
@@ -279,7 +327,7 @@ OfflineAI/
 │   └── package.json
 ├── react-dist/         # Vite build output (served by FastAPI, gitignored)
 ├── static/             # Vendored highlight.js assets (generated by installer, gitignored)
-└── tests/              # Backend and UI tests
+└── tests/              # Backend tests (71 tests across 8 files)
 ```
 
 ### Research Projects folder
@@ -289,13 +337,25 @@ When you create projects, they live at:
 ```
 ~/OfflineAI-Projects/
 └── <project-name>/
-    ├── knowledge.json    # Sources, findings, metadata
-    ├── notes/            # Research summaries (auto-generated)
-    ├── sources/          # Saved source content
-    └── output/           # Generated documents, code, data
-        ├── *.md          # Generated reports
-        ├── data/         # CSV/JSON datasets
-        └── code/         # Multi-file code projects
+    ├── knowledge.json        # Sources, findings, metadata
+    ├── .code_session.json    # Active code session state (spec phases, task progress)
+    ├── .steering/            # Steering documents (auto-generated)
+    │   ├── product.md        # What the project does, users, features
+    │   ├── tech.md           # Technology stack, patterns, conventions
+    │   └── structure.md      # Architecture, directory layout, components
+    ├── .hooks/               # Agent automation hooks
+    │   └── hooks.json        # Hook definitions and run history
+    ├── specs/                # Spec documents per session
+    │   └── <session-id>/
+    │       ├── requirements.md
+    │       ├── design.md
+    │       └── tasks.md
+    ├── notes/                # Research summaries (auto-generated)
+    ├── sources/              # Saved source content
+    └── output/               # Generated documents, code, data
+        ├── *.md              # Generated reports
+        ├── data/             # CSV/JSON datasets
+        └── code/             # Multi-file code projects
 ```
 
 ### Other data directories
@@ -341,10 +401,10 @@ Runtime environment variables:
 | `OFFLINEAI_IMAGE_MAX_WIDTH` | `1024` | Maximum width (px) for generated images. |
 | `OFFLINEAI_IMAGE_MAX_HEIGHT` | `1024` | Maximum height (px) for generated images. |
 | `OFFLINEAI_IMAGE_MAX_STEPS` | `16` | Maximum diffusion steps for image generation. |
-| `OFFLINEAI_IMAGE_DEFAULT_WIDTH` | `768` | Default width (px) for generated images. |
-| `OFFLINEAI_IMAGE_DEFAULT_HEIGHT` | `768` | Default height (px) for generated images. |
-| `OFFLINEAI_IMAGE_DEFAULT_STEPS` | `10` | Default diffusion steps for image generation. |
-| `OFFLINEAI_MAX_TOKEN_ENTRIES` | `1000` | Maximum entries in the token stats log. |
+| `OFFLINEAI_IMAGE_DEFAULT_WIDTH` | `640` | Default width (px) for generated images. |
+| `OFFLINEAI_IMAGE_DEFAULT_HEIGHT` | `640` | Default height (px) for generated images. |
+| `OFFLINEAI_IMAGE_DEFAULT_STEPS` | `6` | Default diffusion steps for image generation. |
+| `OFFLINEAI_MAX_TOKEN_ENTRIES` | `500` | Maximum entries in the token stats log. |
 
 ---
 
@@ -355,29 +415,39 @@ Runtime environment variables:
 |---|---|---|
 | GET | `/api/models` | List available Ollama models |
 | GET | `/api/status` | Ollama connection status |
+| GET | `/api/health` | Full system health diagnostics |
 | POST | `/api/chat` | Stream a chat completion (accepts `project_id` for knowledge injection) |
 | POST | `/api/show` | Show model details |
 | POST | `/api/pull` | Pull/download a model |
 | POST | `/api/ollama/restart` | Restart Ollama process |
-| POST | `/api/follow-ups` | Generate follow-up question suggestions |
+| POST | `/api/suggest-followups` | Generate follow-up question suggestions |
+
+### Queue
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/queue/status` | Current operation queue status |
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/tokens` | Get per-user token usage statistics |
+| DELETE | `/api/tokens` | Reset token counts for a user |
 
 ### Memory
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/api/memory` | Get all saved memory entries |
 | POST | `/api/memory` | Add a memory entry |
-| DELETE | `/api/memory/{id}` | Delete a memory entry |
+| DELETE | `/api/memory/{index}` | Delete a memory entry by index |
 
 ### Tools / Plugins
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/api/tools` | List all custom tools |
-| POST | `/api/tools` | Create a new tool |
-| PUT | `/api/tools/{id}` | Update a tool |
-| DELETE | `/api/tools/{id}` | Delete a tool |
-| POST | `/api/tools/{id}/test` | Test-run a tool |
-| POST | `/api/tools/{id}/toggle` | Enable or disable a tool |
-| GET | `/api/tools/{id}/logs` | Get tool execution logs |
+| GET | `/api/tools/{name}` | Get full tool details including source code |
+| POST | `/api/tools/{name}/execute` | Execute a tool with given parameters |
+| DELETE | `/api/tools/{name}` | Delete a tool |
+| POST | `/api/tools/{name}/toggle` | Enable or disable a tool |
+| POST | `/api/tools/{name}/preview` | Preview tool source code and sample invocation |
+| POST | `/api/tools/build` | Build a new tool from a description |
 
 ### Web Search & Pages
 | Method | Endpoint | Purpose |
@@ -392,22 +462,65 @@ Runtime environment variables:
 | POST | `/api/projects` | Create a new project |
 | GET | `/api/projects/{id}` | Get project metadata |
 | DELETE | `/api/projects/{id}` | Delete a project |
+| PUT | `/api/projects/{id}` | Rename or update a project |
 | GET | `/api/projects/{id}/files` | List project files |
 | GET | `/api/projects/{id}/files/{path}` | Read a file |
 | POST | `/api/projects/{id}/files/{path}` | Write a file |
 | DELETE | `/api/projects/{id}/files/{path}` | Delete a file |
+| POST | `/api/projects/{id}/files/move` | Move or rename a file within the project |
+| GET | `/api/projects/{id}/files/{path}/versions` | List version history for a file |
+| GET | `/api/projects/{id}/files/{path}/versions/{version}` | Retrieve a specific version of a file |
+| POST | `/api/projects/{id}/files/{path}/restore/{version}` | Restore a file to a previous version |
 | GET | `/api/projects/{id}/download/{path}` | Download a file |
+| GET | `/api/projects/{id}/view/{path}` | View a file inline in the browser |
 | GET | `/api/projects/{id}/knowledge` | Get project knowledge base |
 
 ### Generation
 | Method | Endpoint | Purpose |
 |---|---|---|
 | POST | `/api/projects/{id}/research` | Autonomous multi-step research (SSE) |
+| POST | `/api/projects/{id}/research/plan` | Generate a research query plan for review before execution |
+| POST | `/api/projects/{id}/research/execute` | Execute an approved research plan |
 | POST | `/api/projects/{id}/generate-document` | Generate a Markdown document (SSE) |
 | POST | `/api/projects/{id}/generate-code` | Generate multi-file code project (SSE) |
 | POST | `/api/projects/{id}/generate-data` | Generate CSV/JSON data (SSE) |
-| POST | `/api/projects/{id}/export-pdf` | Export Markdown to HTML/PDF |
+| POST | `/api/projects/{id}/export-pdf` | Export Markdown to PDF |
+| POST | `/api/projects/{id}/export-docx` | Export Markdown to DOCX |
+| POST | `/api/projects/{id}/export-html` | Export Markdown to standalone HTML |
 | POST | `/api/projects/{id}/workflow` | Multi-step workflow (SSE) |
+
+### Spec-Driven Code Workflow
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/projects/{id}/code/plan` | Start spec workflow: questions, research, generate requirements.md (SSE) |
+| GET | `/api/projects/{id}/code/spec` | Get all spec documents and current phase |
+| POST | `/api/projects/{id}/code/spec/approve` | Approve current spec phase and advance to next |
+| POST | `/api/projects/{id}/code/spec/generate` | Generate next spec document — design.md or tasks.md (SSE) |
+| POST | `/api/projects/{id}/code/task/execute` | Execute a single implementation task from tasks.md (SSE) |
+| POST | `/api/projects/{id}/code/generate` | Generate code from an approved plan (SSE) |
+| POST | `/api/projects/{id}/code/import` | Import existing folder, scan files, generate steering docs (SSE) |
+| POST | `/api/projects/{id}/code/analyze` | Plan changes to imported code: questions → change plan (SSE) |
+| POST | `/api/projects/{id}/code/edit` | Apply code changes with version tracking (SSE) |
+| GET | `/api/projects/{id}/code/session` | Get current code session state |
+| DELETE | `/api/projects/{id}/code/session` | Close and delete code session |
+
+### Steering Documents
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/projects/{id}/steering/generate` | Generate steering documents — product.md, tech.md, structure.md (SSE) |
+| GET | `/api/projects/{id}/steering` | List all steering documents |
+| GET | `/api/projects/{id}/steering/{doc}` | Read a steering document |
+| PUT | `/api/projects/{id}/steering/{doc}` | Update a steering document |
+
+### Agent Hooks
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/projects/{id}/hooks` | List all hooks for a project |
+| POST | `/api/projects/{id}/hooks` | Create a new hook (LLM generates optimized system prompt) |
+| PUT | `/api/projects/{id}/hooks/{hookId}` | Update a hook |
+| DELETE | `/api/projects/{id}/hooks/{hookId}` | Delete a hook |
+| POST | `/api/projects/{id}/hooks/{hookId}/toggle` | Enable or disable a hook |
+| POST | `/api/projects/{id}/hooks/{hookId}/execute` | Manually trigger a hook |
 
 ### Media
 | Method | Endpoint | Purpose |
@@ -415,6 +528,12 @@ Runtime environment variables:
 | POST | `/api/transcribe` | Transcribe audio via Whisper (SSE) |
 | POST | `/api/extract` | Extract text from documents |
 | POST | `/api/generate-image` | Generate an image via diffusion model |
+
+### Data Portability
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/export-archive` | Export all data as a ZIP archive |
+| POST | `/api/import-archive` | Import a ZIP archive (merge with existing data) |
 
 ---
 
@@ -440,12 +559,12 @@ python -m pytest
 cd react-app && npm test
 
 # End-to-end browser tests (90 tests, requires the server to be stopped first)
-npm run test:ui
+cd react-app && npm run test:ui
 ```
 
-The **backend tests** (10 tests) cover the UI route, Ollama-offline fallback behaviour, request size limits, and LAN token auth.
+The **backend tests** (71 tests across 8 files) cover the UI route, Ollama-offline fallback behaviour, request size limits, LAN token auth, the RestrictedPython sandbox, operation queue, prompt assembly, knowledge store, memory service, project operations, and version history.
 
-The **React unit tests** (~82 tests) cover individual components (`MessageBubble`, `MessageInput`, `Sidebar`, modals) and utility functions (API helpers, file handling, markdown rendering, local storage).
+The **React unit tests** (73 tests) cover individual components (`MessageBubble`, `MessageInput`, `Sidebar`, modals) and utility functions (API helpers, file handling, markdown rendering, local storage).
 
 The **Playwright E2E suite** (90 tests) covers the full user journey end-to-end:
 
