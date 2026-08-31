@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo, useCallback, useState } from 'react';
+import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { renderMarkdown, highlightCodeBlocks } from '../utils/markdown';
 import { writeProjectFile, authHeaders } from '../utils/api';
 
@@ -17,6 +17,9 @@ export interface ArtifactCanvasProps {
   filePath?: string;
   onContentUpdate?: (newContent: string) => void;
   onClose: () => void;
+  specPhase?: string | null;
+  onApprovePhase?: () => void;
+  onExecuteTask?: (taskId: string) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -85,6 +88,24 @@ function addLineNumbers(code: string): { numbered: string; count: number } {
   return { numbered, count: lines.length };
 }
 
+/** Parse task items from tasks.md markdown content. */
+function parseTaskItems(md: string): { id: string; title: string; done: boolean }[] {
+  const tasks: { id: string; title: string; done: boolean }[] = [];
+  const lines = md.split('\n');
+  for (const line of lines) {
+    // Match: - [ ] 1. Task title  OR  - [x] 1.2 Task title (with optional leading whitespace)
+    const m = line.match(/^\s*[-*]\s*\[([ xX])\]\s*(\d+(?:\.\d+)?)[.)]\s*(.+)/);
+    if (m) {
+      tasks.push({
+        id: m[2],
+        title: m[3].trim(),
+        done: m[1].toLowerCase() === 'x',
+      });
+    }
+  }
+  return tasks;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -100,6 +121,9 @@ export default function ArtifactCanvas({
   filePath,
   onContentUpdate,
   onClose,
+  specPhase,
+  onApprovePhase,
+  onExecuteTask,
 }: ArtifactCanvasProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const markdownRef = useRef<HTMLDivElement>(null);
@@ -108,6 +132,24 @@ export default function ArtifactCanvas({
   const [editMode, setEditMode] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [selectedFileContent, setSelectedFileContent] = useState('');
+  const [executingTaskId, setExecutingTaskId] = useState<string | null>(null);
+
+  /* ---- Parse tasks from content when in ready/executing/active phase ---- */
+  const parsedTasks = useMemo(() => {
+    if (specPhase && ['ready', 'executing', 'active'].includes(specPhase)) {
+      return parseTaskItems(content);
+    }
+    return [];
+  }, [content, specPhase]);
+
+  /* ---- Reset executing task when streaming finishes ---- */
+  useEffect(() => {
+    if (!isStreaming && executingTaskId) {
+      setExecutingTaskId(null);
+    }
+  }, [isStreaming, executingTaskId]);
 
   /* ---- Auto-scroll while streaming ---- */
   useEffect(() => {
@@ -135,13 +177,6 @@ export default function ArtifactCanvas({
     a.click();
     URL.revokeObjectURL(url);
   }, [content, contentType, title]);
-
-  /* ---- Copy code handler ---- */
-  const handleCopyCode = useCallback(() => {
-    navigator.clipboard.writeText(content);
-    setCodeCopied(true);
-    setTimeout(() => setCodeCopied(false), 1500);
-  }, [content]);
 
   /* ---- Edit mode handlers ---- */
   const handleEditToggle = useCallback(() => {
@@ -182,6 +217,12 @@ export default function ArtifactCanvas({
       setEditContent('');
     }
   }, [isOpen]);
+
+  /* ---- Reset file selection only when generated files change ---- */
+  useEffect(() => {
+    setSelectedFile(null);
+    setSelectedFileContent('');
+  }, [generatedFiles.length]);
 
   /* ---- Export format handler ---- */
   const handleExportFormat = useCallback(async (format: 'pdf' | 'docx' | 'html') => {
@@ -234,12 +275,6 @@ export default function ArtifactCanvas({
     return '';
   }, [content, contentType]);
 
-  /* ---- Code with line numbers ---- */
-  const codeData = useMemo(() => {
-    if (contentType === 'code') return addLineNumbers(content);
-    return { numbered: '', count: 0 };
-  }, [content, contentType]);
-
   /* ---- Close on Escape ---- */
   useEffect(() => {
     if (!isOpen) return;
@@ -286,44 +321,59 @@ export default function ArtifactCanvas({
         );
 
       case 'code':
-        return (
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={handleCopyCode}
-              aria-label="Copy code"
-              style={{
-                position: 'absolute',
-                top: 8,
-                right: 8,
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 4,
-                border: '1px solid var(--border)',
-                background: 'var(--glass)',
-                color: 'var(--text-2)',
-                cursor: 'pointer',
-                zIndex: 2,
-              }}
-            >
-              {codeCopied ? 'Copied!' : 'Copy'}
-            </button>
-            <pre
-              style={{
-                margin: 0,
-                padding: 16,
-                fontSize: 13,
-                lineHeight: 1.6,
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-                overflowX: 'auto',
-                background: 'var(--glass)',
-                borderRadius: 'var(--r-sm)',
-                color: 'var(--text)',
-              }}
-            >
-              <code>{codeData.numbered}</code>
-            </pre>
-          </div>
-        );
+        {
+          const displayContent = selectedFileContent || content;
+          if (!displayContent.trim()) {
+            return (
+              <div style={{ padding: 20, color: 'var(--text-2)', textAlign: 'center' }}>
+                <p style={{ margin: 0 }}>Click a file below to preview its content</p>
+              </div>
+            );
+          }
+          const displayCode = addLineNumbers(displayContent);
+          return (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(displayContent);
+                  setCodeCopied(true);
+                  setTimeout(() => setCodeCopied(false), 1500);
+                }}
+                aria-label="Copy code"
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  fontSize: 11,
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  border: '1px solid var(--border)',
+                  background: 'var(--glass)',
+                  color: 'var(--text-2)',
+                  cursor: 'pointer',
+                  zIndex: 2,
+                }}
+              >
+                {codeCopied ? 'Copied!' : 'Copy'}
+              </button>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: 16,
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                  overflowX: 'auto',
+                  background: 'var(--glass)',
+                  borderRadius: 'var(--r-sm)',
+                  color: 'var(--text)',
+                }}
+              >
+                <code>{displayCode.numbered}</code>
+              </pre>
+            </div>
+          );
+        }
 
       case 'csv':
         return (
@@ -428,6 +478,24 @@ export default function ArtifactCanvas({
   const renderFiles = () => {
     if (!generatedFiles.length || !activeProjectId) return null;
 
+    // Compute common directory prefix for Download All (ZIP)
+    const computeCommonPrefix = (files: string[]): string => {
+      if (files.length === 0) return '';
+      const parts = files.map((f) => f.split('/'));
+      const common: string[] = [];
+      for (let i = 0; i < parts[0].length - 1; i++) {
+        const segment = parts[0][i];
+        if (parts.every((p) => p[i] === segment)) {
+          common.push(segment);
+        } else {
+          break;
+        }
+      }
+      return common.join('/');
+    };
+
+    const commonPrefix = computeCommonPrefix(generatedFiles);
+
     return (
       <div
         style={{
@@ -435,44 +503,86 @@ export default function ArtifactCanvas({
           padding: '12px 20px 16px',
         }}
       >
-        <h3
-          style={{
-            margin: '0 0 8px',
-            fontSize: 12,
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            color: 'var(--text-2)',
-          }}
-        >
-          Files
-        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <h3
+            style={{
+              margin: 0,
+              fontSize: 12,
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              color: 'var(--text-2)',
+            }}
+          >
+            Files
+          </h3>
+          {commonPrefix && (
+            <a
+              href={`/api/projects/${activeProjectId}/download-zip/${encodeURIComponent(commonPrefix)}`}
+              download
+              style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }}
+            >
+              Download All (ZIP)
+            </a>
+          )}
+        </div>
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {generatedFiles.map((filePath) => {
-            const fileName = filePath.split('/').pop() || filePath;
+          {generatedFiles.map((fp) => {
+            const fileName = fp.split('/').pop() || fp;
             const isPdf = fileName.toLowerCase().endsWith('.pdf');
-            const downloadUrl = `/api/projects/${activeProjectId}/download/${encodeURIComponent(filePath)}`;
-            const viewUrl = `/api/projects/${activeProjectId}/view/${encodeURIComponent(filePath)}`;
+            const downloadUrl = `/api/projects/${activeProjectId}/download/${encodeURIComponent(fp)}`;
+            const viewUrl = `/api/projects/${activeProjectId}/view/${encodeURIComponent(fp)}`;
+            const isSelected = selectedFile === fp;
 
             return (
               <li
-                key={filePath}
+                key={fp}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '6px 10px',
                   borderRadius: 'var(--r-sm)',
-                  background: 'var(--glass)',
+                  background: isSelected ? 'var(--accent-lo, var(--glass-md))' : 'var(--glass)',
+                  border: isSelected ? '1px solid var(--accent)' : '1px solid transparent',
                   fontSize: 13,
                 }}
               >
-                <span
-                  style={{ color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}
-                  title={filePath}
+                <button
+                  onClick={async () => {
+                    try {
+                      const resp = await fetch(
+                        `/api/projects/${activeProjectId}/files/${encodeURIComponent(fp)}`,
+                        { headers: authHeaders() },
+                      );
+                      if (resp.ok) {
+                        const data = await resp.json();
+                        setSelectedFile(fp);
+                        setSelectedFileContent(data.content || '');
+                      }
+                    } catch { /* ignore fetch errors */ }
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    margin: 0,
+                    cursor: 'pointer',
+                    color: isSelected ? 'var(--accent)' : 'var(--text)',
+                    fontWeight: isSelected ? 600 : 400,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    flex: 1,
+                    textAlign: 'left',
+                    fontSize: 13,
+                    fontFamily: 'inherit',
+                  }}
+                  title={fp}
+                  aria-label={`Preview ${fileName}`}
                 >
                   {fileName}
-                </span>
+                </button>
                 <span style={{ display: 'flex', gap: 8, marginLeft: 12, flexShrink: 0 }}>
                   {isPdf && (
                     <a
@@ -582,9 +692,9 @@ export default function ArtifactCanvas({
               flex: 1,
               minWidth: 0,
             }}
-            title={title}
+            title={selectedFile || title}
           >
-            {title}
+            {selectedFile ? selectedFile.split('/').pop() || selectedFile : title}
           </h2>
 
           {/* Content-type badge */}
@@ -769,6 +879,40 @@ export default function ArtifactCanvas({
           </button>
         </header>
 
+        {/* ---- Spec phase progress bar ---- */}
+        {specPhase && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+            borderBottom: '1px solid var(--border)', fontSize: 11, fontWeight: 500,
+          }}>
+            {(['requirements', 'design', 'tasks', 'ready'] as const).map((phase, i) => {
+              const phaseMap: Record<string, string> = {
+                requirements: 'requirements', requirements_review: 'requirements',
+                design: 'design', design_review: 'design',
+                tasks: 'tasks', tasks_review: 'tasks',
+                ready: 'ready', executing: 'ready', active: 'ready',
+              };
+              const current = phaseMap[specPhase || ''] || '';
+              const phaseOrder = ['requirements', 'design', 'tasks', 'ready'];
+              const currentIdx = phaseOrder.indexOf(current);
+              const isComplete = i < currentIdx;
+              const isCurrent = i === currentIdx;
+              return (
+                <React.Fragment key={phase}>
+                  {i > 0 && <span style={{ color: 'var(--text-3)' }}>→</span>}
+                  <span style={{
+                    color: isComplete ? 'var(--accent)' : isCurrent ? 'var(--text)' : 'var(--text-3)',
+                    fontWeight: isCurrent ? 700 : 500,
+                  }}>
+                    {isComplete ? '✓ ' : isCurrent ? '● ' : '○ '}
+                    {phase.charAt(0).toUpperCase() + phase.slice(1)}
+                  </span>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        )}
+
         {/* ---- Scrollable content area ---- */}
         <div
           ref={scrollRef}
@@ -902,6 +1046,110 @@ export default function ArtifactCanvas({
 
         {/* ---- Generated files list ---- */}
         {renderFiles()}
+
+        {/* ---- Task execution panel (when spec is ready) ---- */}
+        {specPhase && ['ready', 'executing', 'active'].includes(specPhase) && parsedTasks.length > 0 && onExecuteTask && (
+          <div style={{
+            borderTop: '1px solid var(--border)', padding: '12px 20px',
+            maxHeight: 280, overflowY: 'auto',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <h3 style={{
+                margin: 0, fontSize: 12, fontWeight: 600, textTransform: 'uppercase',
+                letterSpacing: '0.05em', color: 'var(--text-2)',
+              }}>
+                Implementation Tasks
+              </h3>
+              <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                {parsedTasks.filter(t => t.done).length}/{parsedTasks.length} done
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
+              {parsedTasks.map((task) => (
+                <div
+                  key={task.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '5px 10px', borderRadius: 'var(--r-sm)',
+                    background: executingTaskId === task.id ? 'var(--accent-lo, var(--glass-md))' : 'transparent',
+                    border: executingTaskId === task.id ? '1px solid var(--accent)' : '1px solid transparent',
+                    opacity: task.done ? 0.5 : 1,
+                  }}
+                >
+                  <span style={{
+                    width: 16, height: 16, borderRadius: 3, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', fontSize: 10, flexShrink: 0,
+                    background: task.done ? 'var(--accent)' : 'var(--glass-md)',
+                    border: task.done ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    color: task.done ? '#07080f' : 'var(--text-3)',
+                  }}>
+                    {task.done ? '✓' : ''}
+                  </span>
+                  <span style={{
+                    flex: 1, fontSize: 12, color: task.done ? 'var(--text-3)' : 'var(--text)',
+                    textDecoration: task.done ? 'line-through' : 'none',
+                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    <span style={{ color: 'var(--text-3)', marginRight: 4, fontFamily: 'monospace', fontSize: 10 }}>{task.id}.</span>
+                    {task.title}
+                  </span>
+                  {executingTaskId === task.id && (
+                    <span style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }}>Running…</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            {parsedTasks.some(t => !t.done) && (
+              <button
+                onClick={() => {
+                  // Execute all remaining tasks sequentially
+                  const remaining = parsedTasks.filter(t => !t.done);
+                  if (remaining.length > 0) {
+                    setExecutingTaskId(remaining[0].id);
+                    onExecuteTask('__all__');
+                  }
+                }}
+                disabled={isStreaming || executingTaskId !== null}
+                style={{
+                  width: '100%', padding: '8px 16px', fontSize: 13, fontWeight: 600,
+                  borderRadius: 'var(--r-sm)', border: '1px solid var(--accent)',
+                  background: 'var(--accent)', color: '#07080f', cursor: 'pointer',
+                  opacity: (isStreaming || executingTaskId !== null) ? 0.5 : 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                ▶ Execute All Tasks ({parsedTasks.filter(t => !t.done).length} remaining)
+              </button>
+            )}
+            {parsedTasks.every(t => t.done) && (
+              <div style={{ textAlign: 'center', padding: '8px 0', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>
+                ✓ All tasks completed
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ---- Spec approval button ---- */}
+        {specPhase?.endsWith('_review') && !isStreaming && onApprovePhase && (
+          <div style={{
+            padding: '12px 20px', borderTop: '1px solid var(--border)',
+            display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center',
+          }}>
+            <span style={{ fontSize: 12, color: 'var(--text-2)', marginRight: 'auto' }}>
+              Review the {specPhase.replace('_review', '')} document above, then approve to continue.
+            </span>
+            <button
+              onClick={onApprovePhase}
+              style={{
+                padding: '8px 20px', fontSize: 13, fontWeight: 600,
+                borderRadius: 'var(--r-sm)', border: '1px solid var(--accent)',
+                background: 'var(--accent)', color: '#07080f', cursor: 'pointer',
+              }}
+            >
+              ✓ Approve & Continue
+            </button>
+          </div>
+        )}
       </aside>
     </>
   );

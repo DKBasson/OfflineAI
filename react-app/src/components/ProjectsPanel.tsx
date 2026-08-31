@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import type { Project } from '../types';
 import type { CreationTemplate } from '../constants';
@@ -15,6 +15,8 @@ export function ProjectsPanel() {
     removeProject,
     openProject,
     sendMessage,
+    specPhase,
+    resumeSpec,
   } = useApp();
 
   const [search, setSearch] = useState('');
@@ -23,6 +25,31 @@ export function ProjectsPanel() {
   const [newDesc, setNewDesc] = useState('');
   const [creating, setCreating] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<CreationTemplate | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importPath, setImportPath] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [showHooks, setShowHooks] = useState(false);
+  const [hooks, setHooks] = useState<import('../types').Hook[]>([]);
+  const [hookName, setHookName] = useState('');
+  const [hookEvent, setHookEvent] = useState('file_saved');
+  const [hookPattern, setHookPattern] = useState('');
+  const [hookInstructions, setHookInstructions] = useState('');
+  const [creatingHook, setCreatingHook] = useState(false);
+  const [activeSpec, setActiveSpec] = useState<{ phase: string; description?: string } | null>(null);
+
+  // Check for active spec session when project changes
+  useEffect(() => {
+    if (!activeProject) { setActiveSpec(null); return; }
+    import('../utils/api').then(({ fetchSpecState }) =>
+      fetchSpecState(activeProject.id).then((spec) => {
+        if (spec && spec.phase && spec.phase !== 'active') {
+          setActiveSpec({ phase: spec.phase });
+        } else {
+          setActiveSpec(null);
+        }
+      }).catch(() => setActiveSpec(null))
+    );
+  }, [activeProject, specPhase]); // re-check when specPhase changes
 
   const filtered = search
     ? projects.filter((p) =>
@@ -104,6 +131,17 @@ export function ProjectsPanel() {
           <div className="px-3 py-2 border-b border-border bg-accent-lo/30 shrink-0">
             <div className="text-[11px] text-accent font-medium">Active project</div>
             <div className="text-[13px] text-text-primary truncate">{activeProject.name}</div>
+            {activeSpec && (
+              <button
+                className="mt-1.5 w-full py-1.5 bg-accent/10 border border-accent/30 rounded-[7px] text-[11px] font-semibold text-accent hover:bg-accent/20 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                onClick={() => { resumeSpec(); closeProjectsPanel(); }}
+              >
+                <span>📋</span>
+                <span>
+                  Resume Spec — {activeSpec.phase.replace('_review', ' Review').replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                </span>
+              </button>
+            )}
           </div>
         )}
 
@@ -214,12 +252,159 @@ export function ProjectsPanel() {
         <ProjectFileBrowser />
 
         {/* New project button */}
-        <button
-          className="m-2.5 py-2.5 bg-surface-md border border-border-hi rounded-[9px] text-accent text-[13px] font-semibold cursor-pointer text-center hover:bg-accent-lo hover:border-accent-b transition-colors shrink-0"
-          onClick={() => setShowCreate(true)}
-        >
-          + New Project
-        </button>
+        <div className="m-2.5 grid grid-cols-2 gap-2 shrink-0">
+          <button
+            className="py-2 bg-surface-md border border-border-hi rounded-[9px] text-accent text-[12px] font-semibold cursor-pointer text-center hover:bg-accent-lo hover:border-accent-b transition-colors"
+            onClick={() => { setShowCreate(true); setShowImport(false); setShowHooks(false); }}
+          >
+            + New Project
+          </button>
+          <button
+            className="py-2 bg-surface-md border border-border-hi rounded-[9px] text-accent text-[12px] font-semibold cursor-pointer text-center hover:bg-accent-lo hover:border-accent-b transition-colors"
+            onClick={() => { setShowImport(!showImport); setShowCreate(false); setShowHooks(false); }}
+          >
+            📂 Import Code
+          </button>
+          <button
+            className="py-2 bg-surface-md border border-border-hi rounded-[9px] text-accent text-[12px] font-semibold cursor-pointer text-center hover:bg-accent-lo hover:border-accent-b transition-colors disabled:opacity-40"
+            onClick={() => {
+              if (activeProject) {
+                closeProjectsPanel();
+                sendMessage('/steering generate');
+              }
+            }}
+            disabled={!activeProject}
+          >
+            📋 Steering
+          </button>
+          <button
+            className="py-2 bg-surface-md border border-border-hi rounded-[9px] text-accent text-[12px] font-semibold cursor-pointer text-center hover:bg-accent-lo hover:border-accent-b transition-colors disabled:opacity-40"
+            onClick={() => {
+              setShowHooks(!showHooks);
+              setShowCreate(false);
+              setShowImport(false);
+              if (!showHooks && activeProject) {
+                import('../utils/api').then(({ fetchHooks }) =>
+                  fetchHooks(activeProject.id).then(setHooks)
+                );
+              }
+            }}
+            disabled={!activeProject}
+          >
+            🔗 Hooks
+          </button>
+        </div>
+
+        {/* Import code form */}
+        {showImport && activeProject && (
+          <div className="mx-2.5 mb-2.5 px-3 py-3 border border-border rounded-[9px] bg-surface shrink-0 space-y-2">
+            <div className="text-[12px] font-medium text-text-primary">Import existing code</div>
+            <div className="text-[11px] text-text-dim">Enter the full path to a folder on your machine. The AI will scan and analyze the codebase.</div>
+            <input
+              type="text"
+              placeholder="/path/to/your/project"
+              value={importPath}
+              onChange={(e) => setImportPath(e.target.value)}
+              className="w-full bg-transparent border border-border rounded-sm text-text-primary text-[13px] px-2.5 py-1.5 outline-none focus:border-border-hi font-mono"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && importPath.trim()) {
+                  setImporting(true);
+                  closeProjectsPanel();
+                  sendMessage(`/code import ${importPath.trim()}`);
+                  setImportPath('');
+                  setShowImport(false);
+                  setImporting(false);
+                }
+                if (e.key === 'Escape') setShowImport(false);
+              }}
+            />
+            <div className="flex gap-2">
+              <button
+                className="flex-1 py-1.5 bg-accent text-[#07080f] text-[12px] font-semibold rounded-sm disabled:opacity-50"
+                onClick={() => {
+                  if (!importPath.trim()) return;
+                  setImporting(true);
+                  closeProjectsPanel();
+                  sendMessage(`/code import ${importPath.trim()}`);
+                  setImportPath('');
+                  setShowImport(false);
+                  setImporting(false);
+                }}
+                disabled={!importPath.trim() || importing}
+              >
+                {importing ? 'Importing…' : 'Import & Analyze'}
+              </button>
+              <button
+                className="flex-1 py-1.5 bg-surface-md border border-border text-text-muted text-[12px] rounded-sm"
+                onClick={() => setShowImport(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {showImport && !activeProject && (
+          <div className="mx-2.5 mb-2.5 px-3 py-2 border border-border rounded-[9px] bg-surface shrink-0">
+            <div className="text-[12px] text-text-dim text-center">Select or create a project first to import code into.</div>
+          </div>
+        )}
+
+        {/* Hooks management */}
+        {showHooks && activeProject && (
+          <div className="mx-2.5 mb-2.5 px-3 py-3 border border-border rounded-[9px] bg-surface shrink-0 space-y-2 max-h-[300px] overflow-y-auto">
+            <div className="text-[12px] font-medium text-text-primary">Agent Hooks</div>
+            <div className="text-[11px] text-text-dim">Automate actions when files change or tasks complete.</div>
+            <input type="text" placeholder="Hook name" value={hookName} onChange={(e) => setHookName(e.target.value)}
+              className="w-full bg-transparent border border-border rounded-sm text-text-primary text-[12px] px-2 py-1 outline-none focus:border-border-hi" />
+            <select value={hookEvent} onChange={(e) => setHookEvent(e.target.value)}
+              className="w-full bg-transparent border border-border rounded-sm text-text-primary text-[12px] px-2 py-1 outline-none">
+              <option value="file_saved">On file saved</option>
+              <option value="file_created">On file created</option>
+              <option value="task_completed">On task completed</option>
+              <option value="manual">Manual trigger</option>
+            </select>
+            <input type="text" placeholder="File pattern (e.g. src/**/*.tsx)" value={hookPattern} onChange={(e) => setHookPattern(e.target.value)}
+              className="w-full bg-transparent border border-border rounded-sm text-text-primary text-[12px] px-2 py-1 outline-none focus:border-border-hi font-mono" />
+            <textarea placeholder="Instructions (e.g. Update the test file for this component)" value={hookInstructions}
+              onChange={(e) => setHookInstructions(e.target.value)} rows={2}
+              className="w-full bg-transparent border border-border rounded-sm text-text-primary text-[12px] px-2 py-1 outline-none focus:border-border-hi resize-none" />
+            <button
+              className="w-full py-1.5 bg-accent text-[#07080f] text-[11px] font-semibold rounded-sm disabled:opacity-50"
+              disabled={!hookName.trim() || !hookInstructions.trim() || creatingHook}
+              onClick={async () => {
+                setCreatingHook(true);
+                const { createHookApi } = await import('../utils/api');
+                const hook = await createHookApi(activeProject.id, { name: hookName, event_type: hookEvent, file_pattern: hookPattern, instructions: hookInstructions });
+                if (hook) setHooks((prev) => [...prev, hook]);
+                setHookName(''); setHookPattern(''); setHookInstructions('');
+                setCreatingHook(false);
+              }}
+            >{creatingHook ? 'Creating…' : 'Create Hook'}</button>
+            {hooks.length > 0 && (
+              <div className="space-y-1 pt-1 border-t border-border">
+                {hooks.map((h) => (
+                  <div key={h.id} className="flex items-center gap-2 text-[11px] py-1">
+                    <button onClick={async () => {
+                      const { toggleHookApi } = await import('../utils/api');
+                      const updated = await toggleHookApi(activeProject.id, h.id);
+                      if (updated) setHooks((prev) => prev.map((x) => x.id === h.id ? updated : x));
+                    }} className={`w-4 h-4 rounded-sm border ${h.enabled ? 'bg-accent border-accent' : 'border-border'} flex items-center justify-center text-[8px] text-white cursor-pointer`}>
+                      {h.enabled ? '✓' : ''}
+                    </button>
+                    <span className={`flex-1 truncate ${h.enabled ? 'text-text-primary' : 'text-text-dim line-through'}`}>{h.name}</span>
+                    <span className="text-text-dim">{h.event_type}</span>
+                    <button onClick={async () => {
+                      const { deleteHookApi } = await import('../utils/api');
+                      await deleteHookApi(activeProject.id, h.id);
+                      setHooks((prev) => prev.filter((x) => x.id !== h.id));
+                    }} className="text-text-dim hover:text-text-primary">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </aside>
     </>
   );

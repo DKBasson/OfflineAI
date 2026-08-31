@@ -58,7 +58,7 @@ const COMMANDS: CommandDef[] = [
   {
     name: 'code',
     icon: '💻',
-    description: 'Generate a multi-file code project',
+    description: 'Generate code (plan → generate) or import existing project',
     projectOnly: true,
   },
   {

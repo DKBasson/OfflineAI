@@ -1,5 +1,5 @@
 import { AUTH_TOKEN_KEY } from '../constants';
-import type { Project, ProjectFile, ResearchEvent, Tool } from '../types';
+import type { Project, ProjectFile, ResearchEvent, Tool, Hook, SteeringDoc, SpecState } from '../types';
 
 export function getAuthToken(): string | null {
   return sessionStorage.getItem(AUTH_TOKEN_KEY);
@@ -740,4 +740,95 @@ export async function uploadImportArchive(file: File): Promise<ImportResult | nu
   } catch {
     return null;
   }
+}
+
+// ── Steering ─────────────────────────────────────────────────────────
+
+export async function fetchSteeringDocs(projectId: string): Promise<{ docs: SteeringDoc[]; has_steering: boolean }> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/steering`, { headers: authHeaders() });
+    if (!r.ok) return { docs: [], has_steering: false };
+    return r.json();
+  } catch { return { docs: [], has_steering: false }; }
+}
+
+export async function fetchSteeringDoc(projectId: string, docName: string): Promise<string> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/steering/${encodeURIComponent(docName)}`, { headers: authHeaders() });
+    if (!r.ok) return '';
+    const data = await r.json();
+    return data.content || '';
+  } catch { return ''; }
+}
+
+export async function updateSteeringDoc(projectId: string, docName: string, content: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/steering/${encodeURIComponent(docName)}`, {
+      method: 'PUT', headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ content }),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+// ── Specs ────────────────────────────────────────────────────────────
+
+export async function approveSpecPhase(projectId: string): Promise<{ ok: boolean; spec_phase?: string; status?: string }> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/code/spec/approve`, {
+      method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    });
+    return r.json();
+  } catch { return { ok: false }; }
+}
+
+export async function fetchSpecState(projectId: string): Promise<SpecState | null> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/code/spec`, { headers: authHeaders() });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return { phase: d.spec_phase, requirementsMd: d.requirements_md || '', designMd: d.design_md || '', tasksMd: d.tasks_md || '', tasksCompleted: d.tasks_completed || [] };
+  } catch { return null; }
+}
+
+// ── Hooks ────────────────────────────────────────────────────────────
+
+export async function fetchHooks(projectId: string): Promise<Hook[]> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/hooks`, { headers: authHeaders() });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return data.hooks || [];
+  } catch { return []; }
+}
+
+export async function createHookApi(projectId: string, hook: { name: string; event_type: string; file_pattern: string; instructions: string; model?: string }): Promise<Hook | null> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/hooks`, {
+      method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(hook),
+    });
+    if (!r.ok) return null;
+    return r.json();
+  } catch { return null; }
+}
+
+export async function deleteHookApi(projectId: string, hookId: string): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/hooks/${encodeURIComponent(hookId)}`, {
+      method: 'DELETE', headers: authHeaders(),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+export async function toggleHookApi(projectId: string, hookId: string): Promise<Hook | null> {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/hooks/${encodeURIComponent(hookId)}/toggle`, {
+      method: 'POST', headers: authHeaders(),
+    });
+    if (!r.ok) return null;
+    return r.json();
+  } catch { return null; }
 }

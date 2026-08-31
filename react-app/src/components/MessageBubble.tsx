@@ -134,10 +134,13 @@ function AssistantBubble({
 }) {
   const { activeProject } = useApp();
   const bodyRef = useRef<HTMLDivElement>(null);
+  const lastContentRef = useRef('');
   const [rendered, setRendered] = useState('');
 
   useEffect(() => {
     if (!message.generatedImage && message.content) {
+      if (message.content === lastContentRef.current) return;
+      lastContentRef.current = message.content;
       let cleanContent = message.content;
       cleanContent = cleanContent.replace(/<<TOOL:\w+\([^>]*?\)>>/g, '');
       cleanContent = cleanContent.replace(/<<BUILD_TOOL:.+?>>/g, '');

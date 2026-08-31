@@ -419,3 +419,31 @@ body.focus-mode header:hover { opacity: 1; pointer-events: all; }
   animation: cursor-blink 0.8s step-end infinite;
 }
 @keyframes cursor-blink { 50% { opacity: 0; } }
+
+/* ══ Responsive layout ══════════════════════════════════════════════ */
+@media (max-width: 767px) {
+  /* Sidebar & projects panel become full-screen overlays on mobile */
+  #sidebar.open,
+  #projects-panel.open {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    width: 100%;
+  }
+
+  /* Artifact canvas stacks below the chat on mobile */
+  .artifact-canvas-mobile {
+    position: static !important;
+    width: 100% !important;
+    max-height: 50vh;
+    border-left: none !important;
+    border-top: 1px solid var(--border-hi);
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* Artifact canvas uses 60% width on tablets */
+  .artifact-canvas-tablet {
+    width: 60vw !important;
+  }
+}

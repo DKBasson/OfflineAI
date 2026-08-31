@@ -28,6 +28,11 @@ export interface PendingAudio {
   file: File;
 }
 
+export interface ConversationBranch {
+  parentMessageIndex: number;
+  messages: Message[];
+}
+
 export interface Conversation {
   id: string;
   title: string;
@@ -36,6 +41,7 @@ export interface Conversation {
   messages: Message[];
   systemPrompt?: string;
   systemPromptId?: string;
+  branches?: ConversationBranch[];
 }
 
 export interface SystemPrompt {
@@ -149,4 +155,32 @@ export interface Tool {
   enabled: boolean;
   consecutive_failures?: number;
   code?: string;
+}
+
+export type SpecPhase = 'requirements' | 'requirements_review' | 'design' | 'design_review' | 'tasks' | 'tasks_review' | 'ready' | 'executing' | 'active';
+
+export interface SpecState {
+  phase: SpecPhase;
+  requirementsMd: string;
+  designMd: string;
+  tasksMd: string;
+  tasksCompleted: string[];
+}
+
+export interface Hook {
+  id: string;
+  name: string;
+  event_type: string;
+  file_pattern: string;
+  instructions: string;
+  system_prompt: string;
+  enabled: boolean;
+  created_at: string;
+  runs: { timestamp: string; trigger: string; success: boolean; duration_ms: number }[];
+}
+
+export interface SteeringDoc {
+  name: string;
+  size: number;
+  modified: number;
 }

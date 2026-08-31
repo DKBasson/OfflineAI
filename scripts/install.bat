@@ -131,6 +131,25 @@ call :download_asset "%STATIC_DIR%\highlight.min.js" "https://cdnjs.cloudflare.c
 call :download_asset "%STATIC_DIR%\github-dark.min.css" "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" "9f208d022102b1d0c7aebfecd8e42ca7997d5de636649d2b31ea63093d809019" || exit /b 1
 echo [OK] Front-end assets ready
 
+:: ── Build React frontend ─────────────────────────────────────────
+echo.
+echo [>>] Building React frontend...
+where node >nul 2>nul
+if %errorlevel% equ 0 (
+    pushd "%SCRIPT_DIR%\react-app"
+    call npm install --no-audit --no-fund
+    call npm run build
+    if %errorlevel% equ 0 (
+        echo [OK] React frontend built
+    ) else (
+        echo [!!] React build failed — the start script will retry
+    )
+    popd
+) else (
+    echo [!!] Node.js/npm not found — install Node.js 18+ to build the frontend
+    echo     The start script will attempt to build on launch if node_modules exists
+)
+
 :: ── Done ──────────────────────────────────────────────────────────
 echo.
 echo ==========================================

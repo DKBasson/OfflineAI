@@ -56,6 +56,7 @@ export interface StreamingSliceDeps {
   updateArtifactContent: (content: string) => void;
   updateArtifactFiles: (files: string[]) => void;
   finalizeArtifact: () => void;
+  setSpecPhase: React.Dispatch<React.SetStateAction<import('../../types').SpecPhase | null>>;
 }
 
 export function useStreamingSlice({
@@ -90,12 +91,15 @@ export function useStreamingSlice({
   updateArtifactContent,
   updateArtifactFiles,
   finalizeArtifact,
+  setSpecPhase,
 }: StreamingSliceDeps) {
   const getSettings = useCallback(() => settingsRef.current, [settingsRef]);
 
   const streamingErrorRef = useRef<string | null>(null);
 
   const lastResponseTokensRef = useRef(0);
+
+  const codeSessionActiveRef = useRef<{ projectId: string; active: boolean } | null>(null);
 
   const buildChatPayload = useCallback(
     (msgs: Message[], modelOverride?: string, searchContext?: string) => {
@@ -238,6 +242,7 @@ export function useStreamingSlice({
         code: 'code',
         data: 'csv',
         workflow: 'markdown',
+        steering: 'markdown',
       };
       const artifactType = contentTypeMap[cmd] || 'text';
       const artifactTitle = cmd === 'research' ? `Research: ${arg}` : cmd === 'document' || cmd === 'doc' ? `Document: ${arg}` : cmd === 'code' ? `Code: ${arg}` : cmd === 'data' ? `Data: ${arg}` : cmd === 'workflow' ? `Workflow: ${arg}` : arg;
@@ -258,7 +263,7 @@ export function useStreamingSlice({
             body = { topic: arg, type: 'report', model: activeModel, use_knowledge: true };
             break;
           case 'code':
-            endpoint = `/api/projects/${encodeURIComponent(projectId)}/generate-code`;
+            endpoint = `/api/projects/${encodeURIComponent(projectId)}/code/plan`;
             body = { description: arg, model: activeModel };
             break;
           case 'data':
@@ -268,6 +273,10 @@ export function useStreamingSlice({
           case 'workflow':
             endpoint = `/api/projects/${encodeURIComponent(projectId)}/workflow`;
             body = { request: arg, model: activeModel };
+            break;
+          case 'steering':
+            endpoint = `/api/projects/${encodeURIComponent(projectId)}/steering/generate`;
+            body = { model: activeModel };
             break;
           default:
             setStreamingError('Unknown command: /' + cmd);
@@ -308,9 +317,32 @@ export function useStreamingSlice({
             if (!line.startsWith('data: ')) continue;
             try {
               const evt = JSON.parse(line.slice(6));
-              if (evt.type === 'status' || evt.type === 'search' || evt.type === 'source' || evt.type === 'step_start' || evt.type === 'step_done') {
+              if (evt.type === 'status' || evt.type === 'search' || evt.type === 'source' || evt.type === 'step_start' || evt.type === 'step_done' || evt.type === 'phase') {
                 const msg = evt.message || evt.description || evt.query || '';
                 if (msg) progressMessages.push(msg);
+                setStreamingContent(progressMessages.join('\n'));
+              } else if (evt.type === 'token' || evt.type === 'step_token') {
+                // Stream tokens directly into the artifact canvas
+                finalContent += (evt.text || '');
+                updateArtifactContent(finalContent);
+              } else if (evt.type === 'question') {
+                // Clarification question from /code/plan
+                progressMessages.push(`❓ ${evt.text || ''}`);
+                setStreamingContent(progressMessages.join('\n'));
+              } else if (evt.type === 'plan') {
+                // Plan document generated — show in artifact canvas
+                if (evt.plan_md) {
+                  finalContent = evt.plan_md;
+                  updateArtifactContent(evt.plan_md);
+                }
+              } else if (evt.type === 'summary') {
+                // Edit summary from /code/edit
+                const summaryText = evt.text || '';
+                progressMessages.push(`📝 Changes:\n${summaryText}`);
+                setStreamingContent(progressMessages.join('\n'));
+              } else if (evt.type === 'change') {
+                // Individual file change from /code/edit
+                progressMessages.push(`  ${evt.action === 'created' ? '✨' : '✏️'} ${evt.file}: ${evt.action}`);
                 setStreamingContent(progressMessages.join('\n'));
               } else if (evt.type === 'finding') {
                 if (!summaryContent) finalContent = evt.text || '';
@@ -320,6 +352,18 @@ export function useStreamingSlice({
               } else if (evt.type === 'done') {
                 const doneMsg = evt.message || 'Done!';
                 progressMessages.push(`✔ ${doneMsg}`);
+
+                if (evt.spec_phase) {
+                  setSpecPhase(evt.spec_phase);
+                }
+
+                // If this is a code spec completion, let user review in the artifact canvas
+                if (evt.session_id && cmd === 'code' && endpoint.includes('/code/plan')) {
+                  progressMessages.push('📋 Requirements ready — review in the panel and click "Approve & Continue" to proceed to Design.');
+                  setStreamingContent(progressMessages.join('\n'));
+                  codeSessionActiveRef.current = { projectId: projectId, active: true };
+                }
+
                 if (evt.summary_file) {
                   progressMessages.push(`📄 Saved: ${evt.summary_file}`);
                   generatedFiles.push(evt.summary_file);
@@ -382,7 +426,78 @@ export function useStreamingSlice({
         finalizeArtifact();
       }
     },
-    [activeModel, abortCtrlRef, setIsStreaming, setStreamingContent, setStreamingError, setMessages, saveConversationToHistory, currentConvId, currentSystemPrompt, currentSystemPromptId, setCurrentConvId, openArtifactCanvas, updateArtifactContent, updateArtifactFiles, finalizeArtifact],
+    [activeModel, abortCtrlRef, setIsStreaming, setStreamingContent, setStreamingError, setMessages, saveConversationToHistory, currentConvId, currentSystemPrompt, currentSystemPromptId, setCurrentConvId, openArtifactCanvas, updateArtifactContent, updateArtifactFiles, finalizeArtifact, setSpecPhase],
+  );
+
+  const handleSpecGenerate = useCallback(
+    async (projectId: string, phase: string) => {
+      setIsStreaming(true);
+      setStreamingContent('');
+      setStreamingError(null);
+      openArtifactCanvas({ title: `Spec: ${phase}`, contentType: 'markdown' });
+
+      try {
+        abortCtrlRef.current = new AbortController();
+        const resp = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/code/spec/generate`,
+          {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ model: activeModel }),
+            signal: abortCtrlRef.current.signal,
+          },
+        );
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          setStreamingError(`⚠️ ${(err as { error?: string }).error || 'Failed'}`);
+          setIsStreaming(false);
+          return;
+        }
+
+        const reader = resp.body!.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        let content = '';
+        const progress: string[] = [];
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop()!;
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === 'status') {
+                progress.push(evt.message || '');
+                setStreamingContent(progress.join('\n'));
+              } else if (evt.type === 'token') {
+                content += (evt.text || '');
+                updateArtifactContent(content);
+              } else if (evt.type === 'done') {
+                if (evt.spec_phase) setSpecPhase(evt.spec_phase);
+                progress.push(`✔ ${evt.message || 'Done'}`);
+                setStreamingContent(progress.join('\n'));
+              } else if (evt.type === 'error') {
+                setStreamingError(`⚠️ ${evt.error}`);
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setStreamingError(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setIsStreaming(false);
+        setStreamingContent('');
+        abortCtrlRef.current = null;
+        finalizeArtifact();
+      }
+    },
+    [activeModel, abortCtrlRef, setIsStreaming, setStreamingContent, setStreamingError, openArtifactCanvas, updateArtifactContent, finalizeArtifact, setSpecPhase],
   );
 
   const refineImagePrompt = useCallback(
@@ -604,6 +719,111 @@ export function useStreamingSlice({
       if (!text && !hasPending) return;
 
       if (text && activeProjectId) {
+        // Handle /code import <path> specially
+        const importMatch = text.match(/^\/code\s+import\s+(.+)/i);
+        if (importMatch) {
+          const folderPath = importMatch[1].trim();
+          const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
+          setMessages((prev) => [...prev, userMsg]);
+          setPendingImages([]);
+          setPendingFiles([]);
+          setPendingAudio([]);
+          setIsStreaming(true);
+          setStreamingContent('');
+          setStreamingError(null);
+          openArtifactCanvas({ title: `Import: ${folderPath.split('/').pop() || folderPath}`, contentType: 'markdown' });
+          // Invalidate code session cache — import creates a new session
+          codeSessionActiveRef.current = null;
+
+          try {
+            abortCtrlRef.current = new AbortController();
+            const resp = await fetch(
+              `/api/projects/${encodeURIComponent(activeProjectId)}/code/import`,
+              {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ folder_path: folderPath, model: activeModel }),
+                signal: abortCtrlRef.current.signal,
+              },
+            );
+
+            if (!resp.ok) {
+              const err = await resp.json().catch(() => ({}));
+              setStreamingError(`⚠️ ${(err as {error?: string}).error || 'Import failed'}`);
+              setIsStreaming(false);
+              return;
+            }
+
+            const reader = resp.body!.getReader();
+            const dec = new TextDecoder();
+            let buf = '';
+            let progressMessages: string[] = [];
+            let content = '';
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += dec.decode(value, { stream: true });
+              const lines = buf.split('\n');
+              buf = lines.pop()!;
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                  const evt = JSON.parse(line.slice(6));
+                  if (evt.type === 'status' || evt.type === 'scan') {
+                    progressMessages.push(evt.message || '');
+                    setStreamingContent(progressMessages.join('\n'));
+                  } else if (evt.type === 'token') {
+                    content += (evt.text || '');
+                    updateArtifactContent(content);
+                  } else if (evt.type === 'understanding') {
+                    content = evt.content || content;
+                    updateArtifactContent(content);
+                  } else if (evt.type === 'done') {
+                    progressMessages.push(`✔ ${evt.message || 'Import complete'}`);
+                    setStreamingContent(progressMessages.join('\n'));
+                  } else if (evt.type === 'error') {
+                    setStreamingError(`⚠️ ${evt.error}`);
+                  }
+                } catch { /* ignore */ }
+              }
+            }
+
+            if (content) {
+              const assistantMsg: Message = {
+                role: 'assistant',
+                content: `**Project imported and analyzed.** The understanding document is shown in the artifact canvas.\n\nYou can now send messages to request code changes.`,
+                timestamp: Date.now(),
+                intent: 'code',
+              };
+              setMessages((prev) => {
+                const updated = [...prev, assistantMsg];
+                saveConversationToHistory(updated, currentConvId, activeModel, currentSystemPrompt, currentSystemPromptId)
+                  .then((newId) => { if (newId) setCurrentConvId(newId); });
+                return updated;
+              });
+            }
+          } catch (err: unknown) {
+            if (err instanceof Error && err.name === 'AbortError') return;
+            setStreamingError(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
+          } finally {
+            setIsStreaming(false);
+            setStreamingContent('');
+            abortCtrlRef.current = null;
+            finalizeArtifact();
+          }
+          return;
+        }
+
+        const steeringMatch = text.match(/^\/steering\s+generate/i);
+        if (steeringMatch) {
+          const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
+          setMessages((prev) => [...prev, userMsg]);
+          setPendingImages([]); setPendingFiles([]); setPendingAudio([]);
+          await handleSlashCommand('steering', 'generate', activeProjectId);
+          return;
+        }
+
         const slashMatch = text.match(/^\/(research|document|doc|code|data|workflow)\s+(.+)/i);
         if (slashMatch) {
           const cmd = slashMatch[1].toLowerCase();
@@ -625,6 +845,8 @@ export function useStreamingSlice({
             }
           }
 
+          // Invalidate code session cache — slash commands may create sessions
+          codeSessionActiveRef.current = null;
           await handleSlashCommand(cmd, cleanArg, activeProjectId, depth);
           return;
         }
@@ -677,6 +899,136 @@ export function useStreamingSlice({
           }
           return;
         }
+      }
+
+      // ── Code edit: if active code session exists, route edits through /code/edit ──
+      if (text && activeProjectId && !hasPending) {
+        // Use cached session state — skip network call when we know there's no session
+        const cached = codeSessionActiveRef.current;
+        const needsCheck = !cached || cached.projectId !== activeProjectId || cached.active;
+        if (needsCheck) {
+        try {
+          const sessionResp = await fetch(
+            `/api/projects/${encodeURIComponent(activeProjectId)}/code/session`,
+            { headers: authHeaders() },
+          );
+          if (sessionResp.ok) {
+            const session = await sessionResp.json();
+            codeSessionActiveRef.current = { projectId: activeProjectId, active: session.status === 'active' || session.status === 'planned' };
+            if (session.status === 'active' || session.status === 'planned') {
+              const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
+              setMessages((prev) => [...prev, userMsg]);
+              setPendingImages([]);
+              setPendingFiles([]);
+              setPendingAudio([]);
+              setIsStreaming(true);
+              setStreamingContent('');
+              setStreamingError(null);
+
+              // Open artifact canvas to show live editing
+              openArtifactCanvas({ title: `Editing: ${session.description || 'code'}`, contentType: 'code' });
+
+              try {
+                abortCtrlRef.current = new AbortController();
+                const isPlanned = session.status === 'planned';
+                const codeEndpoint = isPlanned
+                  ? `/api/projects/${encodeURIComponent(activeProjectId)}/code/generate`
+                  : `/api/projects/${encodeURIComponent(activeProjectId)}/code/edit`;
+                const codeBody = isPlanned
+                  ? { model: activeModel, answers: [text] }
+                  : { instruction: text, model: activeModel };
+                const editResp = await fetch(
+                  codeEndpoint,
+                  {
+                    method: 'POST',
+                    headers: authHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify(codeBody),
+                    signal: abortCtrlRef.current.signal,
+                  },
+                );
+
+                if (editResp.ok && editResp.body) {
+                  const editReader = editResp.body.getReader();
+                  const editDec = new TextDecoder();
+                  let editBuf = '';
+                  const editProgress: string[] = [];
+                  let editSummary = '';
+                  let liveContent = '';
+                  const changedFiles: string[] = [];
+
+                  while (true) {
+                    const { done: editDone, value: editValue } = await editReader.read();
+                    if (editDone) break;
+                    editBuf += editDec.decode(editValue, { stream: true });
+                    const editLines = editBuf.split('\n');
+                    editBuf = editLines.pop()!;
+                    for (const editLine of editLines) {
+                      if (!editLine.startsWith('data: ')) continue;
+                      try {
+                        const evt = JSON.parse(editLine.slice(6));
+                        if (evt.type === 'status') {
+                          editProgress.push(evt.message || '');
+                          setStreamingContent(editProgress.join('\n'));
+                        } else if (evt.type === 'token') {
+                          // Stream tokens live into the artifact canvas
+                          liveContent += (evt.text || '');
+                          updateArtifactContent(liveContent);
+                        } else if (evt.type === 'change') {
+                          const icon = evt.action === 'created' ? '✨' : '✏️';
+                          editProgress.push(`  ${icon} ${evt.file}: ${evt.action}`);
+                          if (evt.file) changedFiles.push(evt.file);
+                          updateArtifactFiles([...changedFiles]);
+                          setStreamingContent(editProgress.join('\n'));
+                        } else if (evt.type === 'summary') {
+                          editSummary = evt.text || '';
+                          // Show summary in the canvas as markdown
+                          const summaryMd = `# Changes Applied\n\n${editSummary}\n\n---\n*Click a file below to preview the updated code.*`;
+                          updateArtifactContent(summaryMd);
+                        } else if (evt.type === 'done') {
+                          editProgress.push(`✔ ${evt.message || 'Changes applied'}`);
+                          setStreamingContent(editProgress.join('\n'));
+                        } else if (evt.type === 'error') {
+                          setStreamingError(`⚠️ ${evt.error}`);
+                        }
+                      } catch { /* ignore */ }
+                    }
+                  }
+
+                  const resultText = editSummary
+                    ? `**Changes applied:**\n${editSummary}`
+                    : editProgress.join('\n');
+
+                  const assistantMsg: Message = {
+                    role: 'assistant',
+                    content: resultText,
+                    timestamp: Date.now(),
+                    intent: 'code',
+                    ...(changedFiles.length > 0 ? { generatedFiles: changedFiles } : {}),
+                  };
+                  setMessages((prev) => {
+                    const updated = [...prev, assistantMsg];
+                    saveConversationToHistory(updated, currentConvId, activeModel, currentSystemPrompt, currentSystemPromptId)
+                      .then((newId) => { if (newId) setCurrentConvId(newId); });
+                    return updated;
+                  });
+                }
+              } catch (err: unknown) {
+                if (err instanceof Error && err.name === 'AbortError') return;
+                setStreamingError(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
+              } finally {
+                setIsStreaming(false);
+                setStreamingContent('');
+                abortCtrlRef.current = null;
+              }
+              return;
+            }
+          } else {
+            codeSessionActiveRef.current = { projectId: activeProjectId, active: false };
+          }
+        } catch {
+          // No active session or fetch failed — fall through to normal chat
+        }
+        } // needsCheck
       }
 
       if (text && !hasPending && getSettings().imageGeneration && isImageRequest(text)) {
@@ -905,5 +1257,6 @@ export function useStreamingSlice({
     stopStreaming,
     regenerateLastResponse,
     editAndResend,
+    handleSpecGenerate,
   };
 }
