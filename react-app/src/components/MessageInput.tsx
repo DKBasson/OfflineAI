@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { loadSystemPrompts } from '../utils/storage';
+import { SlashCommandPalette } from './SlashCommandPalette';
 import {
   IMAGE_ACCEPT,
   TEXT_ACCEPT,
@@ -31,6 +32,7 @@ export function MessageInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileAccept, setFileAccept] = useState<string>(TEXT_ACCEPT + ',' + DOC_ACCEPT + ',' + AUDIO_ACCEPT);
+  const [slashVisible, setSlashVisible] = useState(false);
 
   const hasPending = pendingImages.length > 0 || pendingFiles.length > 0 || pendingAudio.length > 0;
   const canSend = !isStreaming && (text.trim().length > 0 || hasPending);
@@ -53,13 +55,35 @@ export function MessageInput() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Let SlashCommandPalette handle keys when visible
+      if (slashVisible && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter' || e.key === 'Escape')) {
+        return; // palette captures these via its own keydown listener
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [text, isStreaming, hasPending],
+    [text, isStreaming, hasPending, slashVisible],
+  );
+
+  // Show slash palette when text starts with /
+  useEffect(() => {
+    setSlashVisible(text.startsWith('/') && !text.includes(' '));
+  }, [text]);
+
+  const handleSlashSelect = useCallback(
+    (command: string, options?: { depth?: string; format?: string; type?: string }) => {
+      setSlashVisible(false);
+      let prefix = `/${command} `;
+      if (options?.depth && options.depth !== 'standard') {
+        prefix = `/${command} --${options.depth} `;
+      }
+      setText(prefix);
+      textareaRef.current?.focus();
+    },
+    [],
   );
 
   const handleSend = useCallback(async () => {
@@ -164,7 +188,16 @@ export function MessageInput() {
         )}
 
         {/* Textarea row */}
-        <div className="flex items-end gap-2">
+        <div className="relative flex items-end gap-2">
+          {/* Slash command palette */}
+          <SlashCommandPalette
+            inputText={text}
+            isVisible={slashVisible}
+            hasActiveProject={!!activeProject}
+            onSelect={handleSlashSelect}
+            onClose={() => setSlashVisible(false)}
+          />
+
           <button
             className="shrink-0 w-8 h-8 rounded-sm bg-transparent border border-transparent text-text-muted hover:bg-surface-md hover:border-border hover:text-text-primary transition-colors flex items-center justify-center mb-0.5"
             title="Attach file"
@@ -189,7 +222,7 @@ export function MessageInput() {
             ref={textareaRef}
             id="input"
             className="flex-1 bg-transparent border-none outline-none text-text-primary text-[14px] resize-none leading-relaxed placeholder:text-text-dim min-h-[36px] max-h-[180px] overflow-y-auto"
-            placeholder={activeProject ? `Message… (try /research, /document, /code, /data, /build)` : 'Message… (try /build to create a tool)'}
+            placeholder={activeProject ? `Message… (try /research, /document, /code, /data, /workflow, /build)` : 'Message… (try /build to create a tool)'}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}

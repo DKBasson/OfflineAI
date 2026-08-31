@@ -1,5 +1,6 @@
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useRef,
@@ -72,12 +73,21 @@ interface AppState {
   activeProject: Project | null;
   projectFiles: ProjectFile[];
   isProjectsPanelOpen: boolean;
+  artifactCanvas: {
+    isOpen: boolean;
+    content: string;
+    contentType: 'markdown' | 'code' | 'csv' | 'json' | 'text';
+    title: string;
+    isStreaming: boolean;
+    generatedFiles: string[];
+  };
 }
 
 interface AppActions {
   sendMessage: (text: string) => Promise<void>;
   stopStreaming: () => void;
   startNewChat: () => void;
+  editAndResend: (messageIndex: number, newContent: string) => Promise<void>;
   loadConversation: (conv: Conversation) => void;
   setActiveModel: (model: string, opts?: { persistDefault?: boolean }) => void;
   setSystemPromptById: (id: string) => void;
@@ -124,6 +134,11 @@ interface AppActions {
   refreshProjectFiles: (projectId: string) => Promise<ProjectFile[]>;
   openProjectsPanel: () => void;
   closeProjectsPanel: () => void;
+  openArtifactCanvas: (opts: { title: string; contentType: AppState['artifactCanvas']['contentType'] }) => void;
+  updateArtifactContent: (content: string) => void;
+  updateArtifactFiles: (files: string[]) => void;
+  closeArtifactCanvas: () => void;
+  finalizeArtifact: () => void;
 }
 
 type AppContextValue = AppState & AppActions;
@@ -176,6 +191,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
   const [isProjectsPanelOpen, setIsProjectsPanelOpen] = useState(false);
+  const [artifactCanvas, setArtifactCanvas] = useState<AppState['artifactCanvas']>({
+    isOpen: false,
+    content: '',
+    contentType: 'text',
+    title: '',
+    isStreaming: false,
+    generatedFiles: [],
+  });
 
   const historyDbRef = useRef<IDBDatabase | null>(null);
   const abortCtrlRef = useRef<AbortController | null>(null);
@@ -253,6 +276,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     fetchAndSetTokens: ui.fetchAndSetTokens,
   });
 
+  const openArtifactCanvas = useCallback((opts: { title: string; contentType: AppState['artifactCanvas']['contentType'] }) => {
+    setArtifactCanvas({ isOpen: true, content: '', contentType: opts.contentType, title: opts.title, isStreaming: true, generatedFiles: [] });
+  }, []);
+  const updateArtifactContent = useCallback((content: string) => {
+    setArtifactCanvas((prev) => ({ ...prev, content }));
+  }, []);
+  const updateArtifactFiles = useCallback((files: string[]) => {
+    setArtifactCanvas((prev) => ({ ...prev, generatedFiles: files }));
+  }, []);
+  const closeArtifactCanvas = useCallback(() => {
+    setArtifactCanvas((prev) => ({ ...prev, isOpen: false }));
+  }, []);
+  const finalizeArtifact = useCallback(() => {
+    setArtifactCanvas((prev) => ({ ...prev, isStreaming: false }));
+  }, []);
+
   const streaming = useStreamingSlice({
     isStreaming,
     messages,
@@ -281,6 +320,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCurrentConvId,
     saveConversationToHistory: hist.saveConversationToHistory,
     fetchAndSetTokens: ui.fetchAndSetTokens,
+    openArtifactCanvas,
+    updateArtifactContent,
+    updateArtifactFiles,
+    finalizeArtifact,
   });
 
   const projectsSlice = useProjectsSlice({
@@ -358,9 +401,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     activeProject,
     projectFiles,
     isProjectsPanelOpen,
+    artifactCanvas,
     sendMessage: streaming.sendMessage,
     stopStreaming: streaming.stopStreaming,
     regenerateLastResponse: streaming.regenerateLastResponse,
+    editAndResend: streaming.editAndResend,
     startNewChat: hist.startNewChat,
     loadConversation: hist.loadConversation,
     deleteConversation: hist.deleteConversation,
@@ -406,6 +451,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshProjectFiles: projectsSlice.refreshProjectFiles,
     openProjectsPanel: projectsSlice.openProjectsPanel,
     closeProjectsPanel: projectsSlice.closeProjectsPanel,
+    openArtifactCanvas,
+    updateArtifactContent,
+    updateArtifactFiles,
+    closeArtifactCanvas,
+    finalizeArtifact,
   } as AppContextValue;
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

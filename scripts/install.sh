@@ -5,7 +5,7 @@ SCRIPT_DIR="${0:A:h:h}"
 cd "$SCRIPT_DIR"
 
 MODEL="gemma4:e4b"
-IMAGE_MODEL="x/z-image-turbo"
+IMAGE_MODEL="x/z-image-turbo"  # Legacy Ollama model; image generation now uses Diffusers (stabilityai/stable-diffusion-xl-turbo) — this pull is kept for backwards compatibility
 
 echo "══════════════════════════════════════════"
 echo "  OfflineAI — Installer"

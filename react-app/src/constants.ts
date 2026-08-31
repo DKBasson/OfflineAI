@@ -43,6 +43,58 @@ export const CLIENT_BODY_LIMIT = 45 * 1024 * 1024;
 
 export const DOC_FILE_RE = /\.(docx|odt|ods|odp|pdf)$/i;
 
+export interface CreationTemplate {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  workflow: string;
+  defaultDepth: 'quick' | 'standard' | 'deep';
+}
+
+export const CREATION_TEMPLATES: CreationTemplate[] = [
+  {
+    id: 'literature-review',
+    name: 'Literature Review',
+    icon: '📚',
+    description: 'Research a topic thoroughly and produce a cited literature review',
+    workflow: 'Research {topic} comprehensively, then write a detailed literature review with citations',
+    defaultDepth: 'deep',
+  },
+  {
+    id: 'competitive-analysis',
+    name: 'Competitive Analysis',
+    icon: '📊',
+    description: 'Analyze competitors and market positioning',
+    workflow: 'Research competitors for {topic}, then write a competitive analysis report with comparison table',
+    defaultDepth: 'standard',
+  },
+  {
+    id: 'blog-post',
+    name: 'Blog Post',
+    icon: '✍️',
+    description: 'Research and write a polished blog post',
+    workflow: 'Research {topic}, then write an engaging blog post with key takeaways',
+    defaultDepth: 'quick',
+  },
+  {
+    id: 'data-report',
+    name: 'Data Report',
+    icon: '📈',
+    description: 'Research and generate a data-driven report',
+    workflow: 'Research {topic}, write an analysis report, and generate a comparison data table',
+    defaultDepth: 'standard',
+  },
+  {
+    id: 'technical-spec',
+    name: 'Technical Spec',
+    icon: '🔧',
+    description: 'Draft a technical specification or RFC',
+    workflow: 'Research best practices for {topic}, then write a detailed technical specification with requirements and architecture',
+    defaultDepth: 'standard',
+  },
+];
+
 export interface ConversationTemplate {
   id: string;
   name: string;

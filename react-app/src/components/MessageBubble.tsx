@@ -10,6 +10,7 @@ interface MessageBubbleProps {
   isLast: boolean;
   onImageClick: (src: string) => void;
   onRegenerate?: () => void;
+  onEdit?: (newContent: string) => void;
 }
 
 export function MessageBubble({
@@ -18,6 +19,7 @@ export function MessageBubble({
   isLast,
   onImageClick,
   onRegenerate,
+  onEdit,
 }: MessageBubbleProps) {
   const { activeUsername } = useApp();
 
@@ -27,6 +29,7 @@ export function MessageBubble({
         message={message}
         username={activeUsername}
         onImageClick={onImageClick}
+        onEdit={onEdit}
       />
     );
   }
@@ -45,12 +48,16 @@ function UserBubble({
   message,
   username,
   onImageClick,
+  onEdit,
 }: {
   message: Message;
   username: string;
   onImageClick: (src: string) => void;
+  onEdit?: (newContent: string) => void;
 }) {
   const initial = username ? username[0].toUpperCase() : 'U';
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(message.content);
 
   return (
     <div className="message user flex gap-3 mb-4 max-w-3xl self-end ml-auto flex-row-reverse items-start group" data-role="user">
@@ -69,11 +76,42 @@ function UserBubble({
             ))}
           </div>
         )}
-        {message.content && (
-          <div className="msg-text user-msg">{message.content}</div>
+        {isEditing ? (
+          <div className="space-y-2">
+            <textarea
+              className="w-full bg-surface border border-border rounded-sm px-2.5 py-2 text-[13px] text-text-primary outline-none focus:border-border-hi resize-y min-h-[60px]"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              autoFocus
+            />
+            <div className="flex gap-1.5">
+              <button
+                className="px-3 py-1 bg-accent text-[#07080f] text-[11px] font-semibold rounded-sm disabled:opacity-50"
+                disabled={!editText.trim()}
+                onClick={() => { setIsEditing(false); onEdit?.(editText.trim()); }}
+              >
+                Save &amp; Resend
+              </button>
+              <button
+                className="px-3 py-1 bg-surface border border-border text-[11px] text-text-muted rounded-sm"
+                onClick={() => { setIsEditing(false); setEditText(message.content); }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {message.content && (
+              <div className="msg-text user-msg">{message.content}</div>
+            )}
+            <MessageActions
+              content={message.content}
+              onEdit={onEdit ? () => { setEditText(message.content); setIsEditing(true); } : undefined}
+            />
+          </>
         )}
-        <MessageActions content={message.content} />
-        {message.timestamp && (
+        {message.timestamp && !isEditing && (
           <div className="text-[10px] text-text-dim mt-1 opacity-0 group-hover:opacity-60 transition-opacity">
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
@@ -192,10 +230,12 @@ function MessageActions({
   content,
   showRegenerate = false,
   onRegenerate,
+  onEdit,
 }: {
   content: string;
   showRegenerate?: boolean;
   onRegenerate?: () => void;
+  onEdit?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -208,6 +248,9 @@ function MessageActions({
 
   return (
     <div className="message-actions flex gap-1.5 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      {onEdit && (
+        <button className="msg-action-btn" onClick={onEdit} aria-label="Edit message">Edit</button>
+      )}
       <button
         className="msg-action-btn"
         onClick={copyText}

@@ -10,6 +10,7 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { Lightbox } from './components/Lightbox';
 import { DragOverlay } from './components/DragOverlay';
 import { ProjectsPanel } from './components/ProjectsPanel';
+import ArtifactCanvas from './components/ArtifactCanvas';
 
 function AppInner() {
   const {
@@ -30,6 +31,9 @@ function AppInner() {
     isProjectsPanelOpen,
     openProjectsPanel,
     closeProjectsPanel,
+    artifactCanvas,
+    closeArtifactCanvas,
+    activeProject,
   } = useApp();
 
   const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
@@ -120,8 +124,22 @@ function AppInner() {
       <Lightbox />
       <DragOverlay />
       <Header />
-      <ChatArea />
-      <MessageInput />
+      <div className="flex flex-1 overflow-hidden">
+        <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300 ${artifactCanvas.isOpen ? 'mr-[50vw]' : ''}`}>
+          <ChatArea />
+          <MessageInput />
+        </div>
+      </div>
+      <ArtifactCanvas
+        isOpen={artifactCanvas.isOpen}
+        content={artifactCanvas.content}
+        contentType={artifactCanvas.contentType}
+        title={artifactCanvas.title}
+        isStreaming={artifactCanvas.isStreaming}
+        generatedFiles={artifactCanvas.generatedFiles}
+        activeProjectId={activeProject?.id ?? null}
+        onClose={closeArtifactCanvas}
+      />
     </div>
   );
 }

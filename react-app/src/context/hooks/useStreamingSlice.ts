@@ -52,6 +52,10 @@ export interface StreamingSliceDeps {
     systemPromptId: string,
   ) => Promise<string | null | undefined>;
   fetchAndSetTokens: (username?: string) => Promise<void>;
+  openArtifactCanvas: (opts: { title: string; contentType: 'markdown' | 'code' | 'csv' | 'json' | 'text' }) => void;
+  updateArtifactContent: (content: string) => void;
+  updateArtifactFiles: (files: string[]) => void;
+  finalizeArtifact: () => void;
 }
 
 export function useStreamingSlice({
@@ -82,6 +86,10 @@ export function useStreamingSlice({
   setCurrentConvId,
   saveConversationToHistory,
   fetchAndSetTokens,
+  openArtifactCanvas,
+  updateArtifactContent,
+  updateArtifactFiles,
+  finalizeArtifact,
 }: StreamingSliceDeps) {
   const getSettings = useCallback(() => settingsRef.current, [settingsRef]);
 
@@ -217,10 +225,23 @@ export function useStreamingSlice({
   }, [abortCtrlRef]);
 
   const handleSlashCommand = useCallback(
-    async (cmd: string, arg: string, projectId: string) => {
+    async (cmd: string, arg: string, projectId: string, depth: 'quick' | 'standard' | 'deep' = 'standard') => {
       setIsStreaming(true);
       setStreamingContent('');
       setStreamingError(null);
+
+      // Determine content type for the artifact canvas
+      const contentTypeMap: Record<string, 'markdown' | 'code' | 'csv' | 'json' | 'text'> = {
+        research: 'markdown',
+        document: 'markdown',
+        doc: 'markdown',
+        code: 'code',
+        data: 'csv',
+        workflow: 'markdown',
+      };
+      const artifactType = contentTypeMap[cmd] || 'text';
+      const artifactTitle = cmd === 'research' ? `Research: ${arg}` : cmd === 'document' || cmd === 'doc' ? `Document: ${arg}` : cmd === 'code' ? `Code: ${arg}` : cmd === 'data' ? `Data: ${arg}` : cmd === 'workflow' ? `Workflow: ${arg}` : arg;
+      openArtifactCanvas({ title: artifactTitle, contentType: artifactType });
 
       try {
         let endpoint = '';
@@ -229,7 +250,7 @@ export function useStreamingSlice({
         switch (cmd) {
           case 'research':
             endpoint = `/api/projects/${encodeURIComponent(projectId)}/research`;
-            body = { topic: arg, depth: 'standard', model: activeModel };
+            body = { topic: arg, depth, model: activeModel };
             break;
           case 'document':
           case 'doc':
@@ -295,6 +316,7 @@ export function useStreamingSlice({
                 if (!summaryContent) finalContent = evt.text || '';
               } else if (evt.type === 'content') {
                 summaryContent = evt.text || '';
+                updateArtifactContent(summaryContent);
               } else if (evt.type === 'done') {
                 const doneMsg = evt.message || 'Done!';
                 progressMessages.push(`✔ ${doneMsg}`);
@@ -309,12 +331,14 @@ export function useStreamingSlice({
                   const pdfVersion = evt.file_path.replace(/\.md$/, '.pdf');
                   if (pdfVersion !== evt.file_path) generatedFiles.push(pdfVersion);
                 }
+                updateArtifactFiles([...generatedFiles]);
                 setStreamingContent(progressMessages.join('\n'));
               } else if (evt.type === 'error') {
                 setStreamingError(`⚠️ ${evt.error}`);
               } else if (evt.type === 'file') {
                 progressMessages.push(`📄 ${evt.path}`);
                 if (evt.path) generatedFiles.push(evt.path);
+                updateArtifactFiles([...generatedFiles]);
                 setStreamingContent(progressMessages.join('\n'));
               } else if (evt.type === 'plan') {
                 const steps = evt.steps || [];
@@ -355,9 +379,10 @@ export function useStreamingSlice({
         setIsStreaming(false);
         setStreamingContent('');
         abortCtrlRef.current = null;
+        finalizeArtifact();
       }
     },
-    [activeModel, abortCtrlRef, setIsStreaming, setStreamingContent, setStreamingError, setMessages, saveConversationToHistory, currentConvId, currentSystemPrompt, currentSystemPromptId, setCurrentConvId],
+    [activeModel, abortCtrlRef, setIsStreaming, setStreamingContent, setStreamingError, setMessages, saveConversationToHistory, currentConvId, currentSystemPrompt, currentSystemPromptId, setCurrentConvId, openArtifactCanvas, updateArtifactContent, updateArtifactFiles, finalizeArtifact],
   );
 
   const refineImagePrompt = useCallback(
@@ -462,12 +487,6 @@ export function useStreamingSlice({
         let generatedB64: string | null = null;
         for await (const chunk of streamImageGeneration(imageBody, signal)) {
           if (chunk.error) {
-            if (chunk.error.includes('not currently supported') || chunk.error.includes('image generation')) {
-              throw new Error(
-                'Image generation is not available. Ollama removed experimental image generation in v0.32.6+. ' +
-                'To use image generation, either downgrade Ollama to v0.32.5 or use an external tool like ComfyUI.',
-              );
-            }
             throw new Error(chunk.error);
           }
           if (chunk.progress != null) {
@@ -557,6 +576,26 @@ export function useStreamingSlice({
     ],
   );
 
+  const editAndResend = useCallback(
+    async (messageIndex: number, newContent: string) => {
+      if (isStreaming) return;
+      const trimmed = messages.slice(0, messageIndex);
+      const userMsg: Message = { role: 'user', content: newContent, timestamp: Date.now() };
+      const nextMsgs = [...trimmed, userMsg];
+      setMessages(nextMsgs);
+
+      const replyText = await streamAssistantReply(nextMsgs, currentConvId);
+      if (replyText) {
+        const assistantMsg: Message = { role: 'assistant', content: replyText, timestamp: Date.now(), tokens: lastResponseTokensRef.current || undefined };
+        const finalMsgs = [...nextMsgs, assistantMsg];
+        setMessages(finalMsgs);
+        const newConvId = await saveConversationToHistory(finalMsgs, currentConvId, activeModel, currentSystemPrompt, currentSystemPromptId);
+        setCurrentConvId(newConvId ?? null);
+      }
+    },
+    [isStreaming, messages, currentConvId, activeModel, currentSystemPrompt, currentSystemPromptId, streamAssistantReply, saveConversationToHistory, setMessages, setCurrentConvId, lastResponseTokensRef],
+  );
+
   const sendMessage = useCallback(
     async (text: string) => {
       if (isStreaming) return;
@@ -574,7 +613,19 @@ export function useStreamingSlice({
           setPendingImages([]);
           setPendingFiles([]);
           setPendingAudio([]);
-          await handleSlashCommand(cmd, arg, activeProjectId);
+
+          // Parse optional depth flag for /research (e.g. "/research --deep quantum computing")
+          let depth: 'quick' | 'standard' | 'deep' = 'standard';
+          let cleanArg = arg;
+          if (cmd === 'research') {
+            const depthMatch = arg.match(/\s*--(quick|standard|deep)\b\s*/i);
+            if (depthMatch) {
+              depth = depthMatch[1].toLowerCase() as 'quick' | 'standard' | 'deep';
+              cleanArg = arg.replace(depthMatch[0], ' ').trim();
+            }
+          }
+
+          await handleSlashCommand(cmd, cleanArg, activeProjectId, depth);
           return;
         }
       }
@@ -853,5 +904,6 @@ export function useStreamingSlice({
     sendMessage,
     stopStreaming,
     regenerateLastResponse,
+    editAndResend,
   };
 }
