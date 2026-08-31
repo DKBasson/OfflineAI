@@ -11,6 +11,8 @@ cd /d "%SCRIPT_DIR%"
 
 set "MODEL=gemma4:e4b"
 set "IMAGE_MODEL=x/z-image-turbo"
+:: Legacy Ollama model; image generation now uses Diffusers (stabilityai/stable-diffusion-xl-turbo)
+:: This pull is kept for backwards compatibility
 
 echo ==========================================
 echo   OfflineAI — Installer (Windows)

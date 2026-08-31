@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { MessageBubble } from './MessageBubble';
 import { WelcomeScreen } from './WelcomeScreen';
+import { fetchFollowups } from '../utils/api';
 
 export function ChatArea() {
   const {
@@ -13,11 +14,15 @@ export function ChatArea() {
     imageProgressLabel,
     regenerateLastResponse,
     openLightbox,
+    editAndResend,
+    activeModel,
+    sendMessage,
   } = useApp();
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const [chatSearch, setChatSearch] = useState('');
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [followups, setFollowups] = useState<string[]>([]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -43,6 +48,16 @@ export function ChatArea() {
     setChatSearchOpen(false);
     setChatSearch('');
   }, [messages.length === 0]);
+
+  useEffect(() => {
+    setFollowups([]);
+    if (messages.length >= 2 && !isStreaming) {
+      const last = messages[messages.length - 1];
+      if (last.role === 'assistant') {
+        fetchFollowups(activeModel, messages.map(m => ({ role: m.role, content: m.content }))).then(setFollowups);
+      }
+    }
+  }, [messages, isStreaming, activeModel]);
 
   const matchCount = chatSearch
     ? messages.filter(m => m.content.toLowerCase().includes(chatSearch.toLowerCase())).length
@@ -96,9 +111,24 @@ export function ChatArea() {
               isLast={idx === messages.length - 1}
               onImageClick={openLightbox}
               onRegenerate={idx === messages.length - 1 && msg.role === 'assistant' && !isStreaming ? regenerateLastResponse : undefined}
+              onEdit={msg.role === 'user' && !isStreaming ? (newContent: string) => editAndResend(idx, newContent) : undefined}
             />
             </div>
           ))}
+
+          {!isStreaming && followups.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-4 max-w-3xl">
+              {followups.map((q, i) => (
+                <button
+                  key={i}
+                  className="px-3 py-1.5 bg-surface border border-border rounded-full text-[12px] text-text-muted hover:bg-surface-md hover:border-border-hi hover:text-text-primary transition-colors cursor-pointer"
+                  onClick={() => { setFollowups([]); sendMessage(q); }}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Streaming assistant bubble */}
           {isStreaming && (

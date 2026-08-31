@@ -12,15 +12,27 @@ Built with [Ollama](https://ollama.com), FastAPI, and a React/TypeScript fronten
 - **Fully offline** — all inference runs locally via Ollama
 - **Conversation history** — persisted locally in browser IndexedDB with search and AI-generated titles
 - **System prompts** — save, duplicate, reorder, and set a default prompt for new conversations
+- **Memory system** — persistent user preferences that carry across conversations, stored server-side and injected into every chat
 - **Image & file support** — attach images or text files via picker, drag-and-drop, or paste
 - **Image generation** — ask the model to draw or generate an image using a local diffusion model
+- **Image performance profiles** — three tiers: Eco (640px, 6 steps), Balanced (768px, 10 steps), Quality (1024px, 16 steps)
+- **Natural language image detection** — 20+ regex patterns detect image requests without explicit commands ("draw me a…", "paint a…", etc.)
 - **Per-chat model selection** — choose a different Ollama model for each conversation
+- **Intent classification & model routing** — optional intent model classifies requests (code/image/text/search) with separate model routing per task type
 - **Local tuning controls** — adjust temperature, top-p, reply tokens, model context tokens, and saved chat limit
+- **Context auto-scaling** — automatically scales context window to 32 768 tokens when web search or project knowledge is active
 - **Markdown rendering** — with syntax highlighting and copy-to-clipboard
+- **Code block actions** — Copy and Save buttons on hover over code blocks in chat
+- **Follow-up suggestions** — AI suggests 3 follow-up questions after each response, shown as clickable pill buttons
+- **Message editing** — edit any user message and resend; the response regenerates from that point
+- **In-chat search (⌘F)** — search within the current conversation, highlights matches and dims non-matching messages
 - **Export conversations** — download any chat as a Markdown file
+- **Import conversations** — import conversations from Markdown files via the history sidebar
+- **Conversation templates** — 5 quick-start templates on the welcome screen (Code Review, Summarize, Brainstorm, Explain Like I'm 5, Debug Helper)
 - **Message controls** — copy messages and regenerate the latest assistant response
-- **Audio transcription** — upload `.mp3`, `.wav`, `.opus`, `.m4a`, and other audio files via Whisper
+- **Audio transcription** — upload `.mp3`, `.wav`, `.ogg`, `.opus`, `.m4a`, `.webm`, `.flac`, `.aac`, `.wma`, `.aiff`, and `.alac` files via Whisper
 - **Document reading** — attach `.docx`, `.odt`, `.ods`, `.odp`, and `.pdf` files
+- **Focus mode** — distraction-free chat view toggled with **⌘+Shift+F**
 
 ### Web Search & Research
 - **Web search** — AI searches the internet via DuckDuckGo for up-to-date information (toggle in Settings)
@@ -31,23 +43,46 @@ Built with [Ollama](https://ollama.com), FastAPI, and a React/TypeScript fronten
 ### Research Projects
 - **Project-based organization** — create named research projects stored at `~/OfflineAI-Projects/`
 - **Project file browser** — browse, preview, and download all project files from the UI
+- **File preview modal** — preview project files inline with PDF viewing and export
 - **Knowledge injection** — when a project is active, the AI automatically has access to all saved research findings
 - **Persistent knowledge base** — sources, key findings, and summaries saved in `knowledge.json`
 
 ### Generation
 - **Document generation** — generate full Markdown reports with PDF/HTML export
+- **PDF export** — WeasyPrint for styled PDF output, with HTML fallback
 - **Multi-file code generation** — generate complete code projects with multiple files
 - **Structured data generation** — generate CSV and JSON datasets
-- **Multi-step workflows** — chain research → document → code → data in a single request
+- **Multi-step workflows** — LLM plans steps from natural language, chains research → document → code → data autonomously
+
+### Tools / Plugins
+- **Custom AI tools** — build tools from natural language descriptions, auto-built using LLM + web research
+- **Tool management** — test, enable, disable, and delete tools from the UI
+- **Tool code validation** — blocks dangerous patterns (file system access, network calls, etc.) in auto-generated code
+- **Auto-disable** — tools that fail 3 times are automatically disabled
+- **Tool run logging** — execution history with timing and error details
+- **`/build` slash command** — build a new tool without needing an active project
 
 ### Infrastructure
 - **Model pull** — download new Ollama models directly from the Settings panel
 - **Ollama restart** — restart the local Ollama runtime from Settings
 - **Cumulative token counter** — tracks total input/output tokens locally and can be reset in Settings
+- **Connection status indicator** — live checking/online/offline with LAN mode detection
+- **First-launch onboarding** — name modal on first visit, personalizes the experience
+- **Auto-title conversations** — AI generates 4-word titles for new conversations
+- **Settings tooltips** — contextual help tooltips on all settings fields
 - **Keyboard shortcuts** — full keyboard navigation (`?` to see all shortcuts)
 - **LAN access** — opt-in serving to devices on your local network
 - **LAN token auth** — LAN launch scripts generate a one-time access token automatically
+- **iOS 26 Liquid Glass design** — dark theme with glass morphism and Pantone 2905 C accent
+- **Full accessibility** — ARIA roles, labels, keyboard navigation, screen reader support
 - **No CDN at runtime** — highlight.js assets vendored locally with checksum verification
+
+### Security & Storage
+- **IndexedDB with localStorage fallback** — robust storage with automatic fallback
+- **LAN token in sessionStorage** — token cleared when browser tab closes
+- **Base64 image stripping** — images stripped from saved history to minimise storage use
+- **Path traversal prevention** — security for project file operations
+- **Request body size limit** — 50 MB limit with 413 response
 
 ---
 
@@ -140,6 +175,7 @@ That URL includes a `token` query parameter for non-local devices. Localhost rem
 | Toggle history sidebar | **⌘L** / **Ctrl+L** |
 | Toggle projects panel | **⌘P** / **Ctrl+P** |
 | Export conversation | **⌘E** / **Ctrl+E** |
+| Search in chat | **⌘F** / **Ctrl+F** |
 | Focus input | **⌘/** / **Ctrl+/** |
 | Focus mode | **Shift+⌘F** / **Shift+Ctrl+F** |
 | Show all shortcuts | **?** |
@@ -171,6 +207,12 @@ When a project is active, type these in the message box:
 | `/code <description>` | Generates a multi-file code project |
 | `/data <topic>` | Generates structured data (CSV) |
 | `/workflow <request>` | Chains multiple steps (research → document → code → data) autonomously |
+
+Works without an active project:
+
+| Command | What it does |
+|---|---|
+| `/build <description>` | Build a custom AI tool from a natural language description |
 
 **Examples:**
 ```
@@ -256,6 +298,13 @@ When you create projects, they live at:
         └── code/         # Multi-file code projects
 ```
 
+### Other data directories
+
+```
+~/OfflineAI-Plugins/      # Custom AI tools (auto-created when you build tools)
+~/OfflineAI-Memory/        # Persistent user preferences (server-side memory system)
+```
+
 ---
 
 ## Configuration
@@ -287,6 +336,15 @@ Runtime environment variables:
 | `OFFLINEAI_PORT` | `8080` | Web server port. |
 | `OFFLINEAI_TOKEN` | auto-generated in LAN mode | API token required for non-local LAN clients. |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint. |
+| `OLLAMA_RESTART_CMD` | *(none)* | Custom command to restart Ollama (e.g. a service manager command). |
+| `WHISPER_MODEL` | `tiny` | Whisper model size for audio transcription. |
+| `OFFLINEAI_IMAGE_MAX_WIDTH` | `1024` | Maximum width (px) for generated images. |
+| `OFFLINEAI_IMAGE_MAX_HEIGHT` | `1024` | Maximum height (px) for generated images. |
+| `OFFLINEAI_IMAGE_MAX_STEPS` | `16` | Maximum diffusion steps for image generation. |
+| `OFFLINEAI_IMAGE_DEFAULT_WIDTH` | `768` | Default width (px) for generated images. |
+| `OFFLINEAI_IMAGE_DEFAULT_HEIGHT` | `768` | Default height (px) for generated images. |
+| `OFFLINEAI_IMAGE_DEFAULT_STEPS` | `10` | Default diffusion steps for image generation. |
+| `OFFLINEAI_MAX_TOKEN_ENTRIES` | `1000` | Maximum entries in the token stats log. |
 
 ---
 
@@ -301,6 +359,25 @@ Runtime environment variables:
 | POST | `/api/show` | Show model details |
 | POST | `/api/pull` | Pull/download a model |
 | POST | `/api/ollama/restart` | Restart Ollama process |
+| POST | `/api/follow-ups` | Generate follow-up question suggestions |
+
+### Memory
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/memory` | Get all saved memory entries |
+| POST | `/api/memory` | Add a memory entry |
+| DELETE | `/api/memory/{id}` | Delete a memory entry |
+
+### Tools / Plugins
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/tools` | List all custom tools |
+| POST | `/api/tools` | Create a new tool |
+| PUT | `/api/tools/{id}` | Update a tool |
+| DELETE | `/api/tools/{id}` | Delete a tool |
+| POST | `/api/tools/{id}/test` | Test-run a tool |
+| POST | `/api/tools/{id}/toggle` | Enable or disable a tool |
+| GET | `/api/tools/{id}/logs` | Get tool execution logs |
 
 ### Web Search & Pages
 | Method | Endpoint | Purpose |
@@ -366,9 +443,9 @@ cd react-app && npm test
 npm run test:ui
 ```
 
-The **backend tests** cover the UI route, Ollama-offline fallback behaviour, request size limits, and LAN token auth.
+The **backend tests** (10 tests) cover the UI route, Ollama-offline fallback behaviour, request size limits, and LAN token auth.
 
-The **React unit tests** cover individual components (`MessageBubble`, `MessageInput`, `Sidebar`, modals) and utility functions (API helpers, file handling, markdown rendering, local storage).
+The **React unit tests** (~82 tests) cover individual components (`MessageBubble`, `MessageInput`, `Sidebar`, modals) and utility functions (API helpers, file handling, markdown rendering, local storage).
 
 The **Playwright E2E suite** (90 tests) covers the full user journey end-to-end:
 

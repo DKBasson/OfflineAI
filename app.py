@@ -12,6 +12,7 @@ import threading
 import time
 import unicodedata
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Response, FileResponse
@@ -79,6 +80,8 @@ try:
 except ImportError:
     _WEASYPRINT_AVAILABLE = False
 
+import image_gen as _image_gen
+
 _WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL", "tiny")
 _whisper_model: object = None
 _whisper_lock = asyncio.Lock()
@@ -94,6 +97,7 @@ async def _get_whisper() -> object:
     return _whisper_model
 
 app = FastAPI(title="OfflineAI")
+_SERVER_START_TIME = time.time()
 
 OLLAMA     = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 HOST       = os.environ.get("OFFLINEAI_HOST", "127.0.0.1")
@@ -331,6 +335,142 @@ async def status():
             },
             status_code=503,
         )
+
+
+def _get_system_memory() -> tuple[float, float]:
+    """Return (total_gb, available_gb) using OS-native methods. No psutil needed."""
+    total_gb = 0.0
+    avail_gb = 0.0
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            raw = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip()
+            total_bytes = int(raw)
+            total_gb = round(total_bytes / (1024 ** 3), 1)
+            vm = subprocess.check_output(["vm_stat"], text=True)
+            page_size = 4096
+            ps_match = re.search(r"page size of (\d+) bytes", vm)
+            if ps_match:
+                page_size = int(ps_match.group(1))
+            free = int(re.search(r"Pages free:\s+(\d+)", vm).group(1)) if re.search(r"Pages free:\s+(\d+)", vm) else 0
+            inactive = int(re.search(r"Pages inactive:\s+(\d+)", vm).group(1)) if re.search(r"Pages inactive:\s+(\d+)", vm) else 0
+            avail_gb = round((free + inactive) * page_size / (1024 ** 3), 1)
+        elif system == "Linux":
+            with open("/proc/meminfo") as f:
+                meminfo = f.read()
+            mt = re.search(r"MemTotal:\s+(\d+)\s+kB", meminfo)
+            ma = re.search(r"MemAvailable:\s+(\d+)\s+kB", meminfo)
+            if mt:
+                total_gb = round(int(mt.group(1)) / (1024 ** 2), 1)
+            if ma:
+                avail_gb = round(int(ma.group(1)) / (1024 ** 2), 1)
+        else:
+            total_gb = round(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024 ** 3), 1) if hasattr(os, "sysconf") else 0
+    except Exception:
+        pass
+    return total_gb, avail_gb
+
+
+def _dir_size_mb(path: Path) -> float:
+    """Return directory size in MB."""
+    total = 0
+    try:
+        for f in path.rglob("*"):
+            if f.is_file():
+                total += f.stat().st_size
+    except Exception:
+        pass
+    return round(total / (1024 * 1024), 1)
+
+
+@app.get("/api/health")
+async def health_check():
+    """Comprehensive health/diagnostics endpoint."""
+    # --- Ollama ---
+    ollama_info: dict = {"status": "offline", "version": None, "models_count": 0}
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            ver_resp = await client.get(f"{OLLAMA}/api/version")
+            if ver_resp.status_code == 200:
+                ver_data = ver_resp.json()
+                ollama_info["version"] = ver_data.get("version")
+            tags_resp = await client.get(f"{OLLAMA}/api/tags")
+            if tags_resp.status_code == 200:
+                ollama_info["status"] = "online"
+                ollama_info["models_count"] = len(tags_resp.json().get("models", []))
+    except Exception:
+        pass
+
+    # --- System ---
+    ram_total, ram_avail = await asyncio.to_thread(_get_system_memory)
+    try:
+        disk = shutil.disk_usage(Path.home())
+        disk_free_gb = round(disk.free / (1024 ** 3), 1)
+    except Exception:
+        disk_free_gb = 0
+
+    system_info = {
+        "platform": platform.system().lower(),
+        "python": platform.python_version(),
+        "ram_total_gb": ram_total,
+        "ram_available_gb": ram_avail,
+        "disk_free_gb": disk_free_gb,
+    }
+
+    # --- Services ---
+    services: dict = {}
+
+    # Whisper
+    if _WHISPER_AVAILABLE:
+        services["whisper"] = {"available": True, "model": _WHISPER_MODEL_SIZE}
+    else:
+        services["whisper"] = {"available": False, "reason": "faster-whisper not installed"}
+
+    # WeasyPrint
+    if _WEASYPRINT_AVAILABLE:
+        services["weasyprint"] = {"available": True}
+    else:
+        services["weasyprint"] = {"available": False, "reason": "weasyprint not installed"}
+
+    # Diffusers / image generation — check if torch is importable
+    try:
+        import torch  # noqa: F401
+        services["diffusers"] = {"available": True}
+    except ImportError:
+        services["diffusers"] = {"available": False, "reason": "torch not installed"}
+
+    # Document parsing
+    if _DOCX_AVAILABLE:
+        services["docx"] = {"available": True}
+    else:
+        services["docx"] = {"available": False, "reason": "python-docx not installed"}
+
+    # --- Projects ---
+    project_count = 0
+    if PROJECTS_DIR.is_dir():
+        project_count = sum(1 for d in PROJECTS_DIR.iterdir() if d.is_dir() and (d / "knowledge.json").is_file())
+    projects_disk = await asyncio.to_thread(_dir_size_mb, PROJECTS_DIR) if PROJECTS_DIR.is_dir() else 0
+
+    # --- Tools ---
+    registry = _load_tool_registry()
+    tools_enabled = sum(1 for t in registry if t.get("enabled", True))
+    tools_disabled = len(registry) - tools_enabled
+
+    # --- Memory ---
+    memories = _load_memories()
+
+    # --- Uptime ---
+    uptime = round(time.time() - _SERVER_START_TIME)
+
+    return {
+        "ollama": ollama_info,
+        "system": system_info,
+        "services": services,
+        "projects": {"count": project_count, "disk_usage_mb": projects_disk},
+        "tools": {"count": len(registry), "enabled": tools_enabled, "disabled": tools_disabled},
+        "memory": {"count": len(memories)},
+        "uptime_seconds": uptime,
+    }
 
 
 @app.post("/api/ollama/restart")
@@ -623,7 +763,8 @@ async def _extract_findings(topic: str, page_contents: list[str], model: str) ->
 Source material:
 {combined}
 
-Provide a structured list of key findings, facts, and insights. Be specific and factual. Include relevant data points, dates, and names where available."""
+Provide a structured list of key findings, facts, and insights. Be specific and factual. Include relevant data points, dates, and names where available.
+For each finding, note which source it came from by including the source name in parentheses at the end, e.g. "Finding text (Source: Article Title)"."""
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -641,23 +782,30 @@ Provide a structured list of key findings, facts, and insights. Be specific and 
 
 async def _synthesize_summary(topic: str, findings: str, sources: list[dict], model: str) -> str:
     """Use LLM to write a comprehensive research summary."""
-    sources_list = "\n".join(f"- {s.get('title', 'Unknown')}: {s.get('url', '')}" for s in sources[:15])
+    sources_list = "\n".join(f"[{i}] {s.get('title', 'Unknown')}: {s.get('url', '')}" for i, s in enumerate(sources[:15], 1))
 
     prompt = f"""Write a comprehensive research summary about "{topic}" based on the following findings and sources.
 
 Key Findings:
 {findings}
 
-Sources consulted:
+Numbered Sources:
 {sources_list}
 
 Write a well-structured Markdown document with:
 1. A title (# heading)
 2. An executive summary paragraph
 3. Key findings organized by theme (## subheadings)
-4. A sources section at the end
+4. A "## References" section at the end listing all cited sources as a numbered list
 
-Be thorough, factual, and cite sources where relevant."""
+CITATION RULES (you MUST follow these):
+- Use inline citation markers like [1], [2], etc. to reference the numbered sources above.
+- Place the citation marker immediately after the claim or fact it supports.
+- Every factual claim should have at least one citation.
+- In the References section, list each cited source as: [N] Title — URL
+- Only cite sources from the numbered list above. Do not invent sources.
+
+Be thorough and factual."""
 
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:
@@ -731,9 +879,9 @@ def _get_project_knowledge_context(project_id: str, max_chars: int = 8000) -> st
             parts.append("")
 
         if sources:
-            parts.append("Available Sources:")
-            for s in sources[-15:]:
-                parts.append(f"- {s.get('title', 'Unknown')}: {s.get('url', '')}")
+            parts.append("Available Sources (use [N] to cite inline):")
+            for i, s in enumerate(sources[-15:], 1):
+                parts.append(f"[{i}] {s.get('title', 'Unknown')}: {s.get('url', '')}")
 
         parts.append("---")
 
@@ -774,8 +922,134 @@ def _validate_tool_code(code: str) -> tuple[bool, str]:
             return False, f"Blocked pattern found: {pattern}"
     return True, ""
 
-def _execute_tool(tool_name: str, params: dict, timeout: float = 10.0) -> dict:
-    """Load and execute a tool by name with given parameters."""
+def _execute_tool_sandboxed(tool_name: str, params: dict, timeout: float = 10.0) -> dict:
+    """Execute a tool in an isolated subprocess for safety."""
+    import sys as _sys
+
+    registry = _load_tool_registry()
+    tool_entry = next((t for t in registry if t["name"] == tool_name and t.get("enabled", True)), None)
+    if not tool_entry:
+        return {"error": f"Tool '{tool_name}' not found or disabled"}
+
+    module_path = PLUGINS_DIR / tool_entry["module"]
+    if not module_path.exists():
+        return {"error": f"Tool module not found: {tool_entry['module']}"}
+
+    expected_params = tool_entry.get("parameters", {})
+    for param_name, param_spec in expected_params.items():
+        if param_spec.get("required") and param_name not in params:
+            return {"error": f"Missing required parameter: {param_name}"}
+
+    # Build a temporary runner script that imports the tool and calls run()
+    runner_code = (
+        "import json, sys\n"
+        "sys.path.insert(0, '')\n"
+        "import importlib.util\n"
+        f"spec = importlib.util.spec_from_file_location('tool', {str(module_path)!r})\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "if not hasattr(mod, 'run'):\n"
+        "    print(json.dumps({'__sandbox_error': 'No run() function'}))\n"
+        "    sys.exit(0)\n"
+        f"params = json.loads({json.dumps(json.dumps(params))})\n"
+        "try:\n"
+        "    result = mod.run(**params)\n"
+        "    print(json.dumps({'__sandbox_result': result}, default=str))\n"
+        "except Exception as e:\n"
+        "    print(json.dumps({'__sandbox_error': str(e)}))\n"
+    )
+
+    runner_file = None
+    try:
+        # Write runner to a temp file
+        fd, runner_path = tempfile.mkstemp(suffix=".py", prefix="tool_runner_")
+        runner_file = runner_path
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(runner_code)
+
+        # Use the same Python interpreter (venv-aware)
+        python_exe = _sys.executable
+
+        # Build a minimal environment: inherit only essential vars
+        safe_env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": os.environ.get("HOME", ""),
+            "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+            "PYTHONPATH": "",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        # On macOS, DYLD_LIBRARY_PATH may be needed
+        if "DYLD_LIBRARY_PATH" in os.environ:
+            safe_env["DYLD_LIBRARY_PATH"] = os.environ["DYLD_LIBRARY_PATH"]
+
+        proc = subprocess.run(
+            [python_exe, runner_path],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=safe_env,
+            cwd=str(PLUGINS_DIR),
+        )
+
+        stdout = proc.stdout.strip()
+        stderr = proc.stderr.strip()
+
+        if proc.returncode != 0:
+            error_msg = stderr or f"Process exited with code {proc.returncode}"
+            _increment_tool_failure(tool_name)
+            _log_tool_run(tool_name, params, None, error_msg)
+            log.warning("Tool %s sandbox failed (exit %d): %s", tool_name, proc.returncode, error_msg)
+            return {"error": f"Tool execution failed: {error_msg}"}
+
+        if not stdout:
+            _increment_tool_failure(tool_name)
+            _log_tool_run(tool_name, params, None, "No output from sandbox")
+            return {"error": "Tool produced no output"}
+
+        # Parse the last line of stdout as JSON (tool may print debug info before)
+        output_line = stdout.strip().split("\n")[-1]
+        try:
+            output = json.loads(output_line)
+        except json.JSONDecodeError:
+            _increment_tool_failure(tool_name)
+            _log_tool_run(tool_name, params, None, f"Invalid JSON output: {output_line[:200]}")
+            return {"error": f"Tool returned invalid output"}
+
+        if "__sandbox_error" in output:
+            _increment_tool_failure(tool_name)
+            _log_tool_run(tool_name, params, None, output["__sandbox_error"])
+            return {"error": f"Tool execution failed: {output['__sandbox_error']}"}
+
+        result = output.get("__sandbox_result")
+
+        for t in registry:
+            if t["name"] == tool_name:
+                t["usage_count"] = t.get("usage_count", 0) + 1
+                t["last_used"] = datetime.now(timezone.utc).isoformat()
+                t["consecutive_failures"] = 0
+                break
+        _save_tool_registry(registry)
+        _log_tool_run(tool_name, params, result, None)
+        log.info("Tool %s executed successfully (sandboxed)", tool_name)
+        return {"result": result}
+
+    except subprocess.TimeoutExpired:
+        _increment_tool_failure(tool_name)
+        _log_tool_run(tool_name, params, None, "Timeout")
+        log.warning("Tool %s sandbox timed out after %ss", tool_name, timeout)
+        return {"error": f"Tool '{tool_name}' timed out after {timeout}s"}
+    except Exception as exc:
+        _increment_tool_failure(tool_name)
+        _log_tool_run(tool_name, params, None, str(exc))
+        log.warning("Tool %s sandbox error: %s", tool_name, exc)
+        return {"error": f"Sandbox execution failed: {exc}"}
+    finally:
+        if runner_file and os.path.exists(runner_file):
+            os.unlink(runner_file)
+
+
+def _execute_tool_legacy(tool_name: str, params: dict, timeout: float = 10.0) -> dict:
+    """Load and execute a tool in-process (legacy fallback)."""
     import importlib.util
     import concurrent.futures
 
@@ -813,7 +1087,7 @@ def _execute_tool(tool_name: str, params: dict, timeout: float = 10.0) -> dict:
                 break
         _save_tool_registry(registry)
         _log_tool_run(tool_name, params, result, None)
-        log.info("Tool %s executed successfully", tool_name)
+        log.info("Tool %s executed successfully (legacy)", tool_name)
         return {"result": result}
 
     except concurrent.futures.TimeoutError:
@@ -826,6 +1100,15 @@ def _execute_tool(tool_name: str, params: dict, timeout: float = 10.0) -> dict:
         _log_tool_run(tool_name, params, None, str(exc))
         log.warning("Tool %s failed: %s", tool_name, exc)
         return {"error": f"Tool execution failed: {exc}"}
+
+
+def _execute_tool(tool_name: str, params: dict, timeout: float = 10.0) -> dict:
+    """Execute a tool, trying sandboxed subprocess first, falling back to legacy in-process."""
+    result = _execute_tool_sandboxed(tool_name, params, timeout)
+    if result.get("error", "").startswith("Sandbox execution failed:"):
+        log.info("Sandbox failed for %s, falling back to legacy execution", tool_name)
+        return _execute_tool_legacy(tool_name, params, timeout)
+    return result
 
 def _increment_tool_failure(tool_name: str) -> None:
     """Increment failure counter; auto-disable after 3 consecutive failures."""
@@ -890,6 +1173,43 @@ def _get_tools_summary() -> str:
     lines.append("If you need external data and no tool above covers it, respond with:")
     lines.append("<<BUILD_TOOL:description of what capability you need>>")
     lines.append("The system will automatically research, build, and register a new tool.")
+    lines.append("---")
+    return "\n".join(lines)
+
+def _load_memories() -> list[str]:
+    try:
+        data = json.loads(_MEMORY_FILE.read_text(encoding="utf-8"))
+        return [str(m) for m in data if isinstance(m, str)]
+    except Exception:
+        return []
+
+def _save_memories(memories: list[str]) -> None:
+    _MEMORY_FILE.write_text(json.dumps(memories, indent=2, ensure_ascii=False), encoding="utf-8")
+
+def _add_memory(text: str) -> None:
+    memories = _load_memories()
+    text = text.strip()
+    if text and text not in memories:
+        memories.append(text)
+        _save_memories(memories)
+        log.info("Memory added: %s", text[:80])
+
+def _remove_memory(index: int) -> bool:
+    memories = _load_memories()
+    if 0 <= index < len(memories):
+        removed = memories.pop(index)
+        _save_memories(memories)
+        log.info("Memory removed: %s", removed[:80])
+        return True
+    return False
+
+def _get_memory_context() -> str:
+    memories = _load_memories()
+    if not memories:
+        return ""
+    lines = ["--- USER PREFERENCES (always follow these) ---"]
+    for m in memories:
+        lines.append(f"- {m}")
     lines.append("---")
     return "\n".join(lines)
 
@@ -1157,6 +1477,91 @@ Return ONLY the Python code, no markdown fences, no explanations."""
     return {"ok": False, "error": "Failed to build tool after 3 attempts"}
 
 
+async def _build_tool_preview(description: str, model: str) -> dict:
+    """Generate tool code for preview without registering or testing it."""
+    log.info("Building tool preview: %s", description)
+    queries = await _generate_search_queries(f"free API no key required for: {description}", 3, model)
+    api_info = []
+    for q in queries:
+        results = await _do_web_search(q, max_results=3)
+        for r in results[:2]:
+            page = await _fetch_page_content(r.get("href", ""), max_chars=3000)
+            if page:
+                api_info.append(page)
+
+    combined_research = "\n\n---\n\n".join(api_info[:5])[:15000]
+
+    tool_prompt = f"""Write a Python tool module for: "{description}"
+
+Research findings about available APIs:
+{combined_research}
+
+The module MUST follow this EXACT format:
+TOOL_NAME = "short_name"
+TOOL_DESCRIPTION = "What this tool does in one sentence"
+TOOL_PARAMETERS = {{
+    "param_name": {{"type": "string", "description": "What this param is", "required": True}}
+}}
+
+def run(**kwargs) -> dict:
+    import httpx
+    # implementation
+    return {{"key": "value"}}
+
+CRITICAL RULES:
+- The tool MUST be GENERIC, not specific to one city/item/thing. Use parameters for the variable parts.
+- TOOL_NAME must be short and generic: "weather", "stock_price", "currency"
+- Use ONLY free APIs that require NO API keys.
+- Only import from: httpx, json, datetime, re, math, urllib, html, csv, collections, time, calendar, decimal, statistics, base64, hashlib
+- The run() function MUST accept **kwargs and return a dict
+- Handle errors gracefully with try/except, return {{"error": "message"}} on failure
+- Do NOT use os, subprocess, eval, exec, open(), pathlib, shutil, glob
+
+Return ONLY the Python code, no markdown fences, no explanations."""
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{OLLAMA}/api/chat", json={
+                "model": model,
+                "messages": [{"role": "user", "content": tool_prompt}],
+                "stream": False,
+                "options": {"temperature": 0.2, "num_predict": 4096, "num_ctx": 32768},
+            })
+            data = resp.json()
+            code = data.get("message", {}).get("content", "")
+
+        code = code.strip()
+        if code.startswith("```"):
+            lines = code.split("\n")
+            if lines[-1].strip() == "```":
+                lines = lines[1:-1]
+            else:
+                lines = lines[1:]
+            code = "\n".join(lines)
+
+        valid, error = _validate_tool_code(code)
+        if not valid:
+            return {"ok": False, "error": f"Generated code has security issue: {error}", "code": code}
+
+        # Extract metadata from generated code without executing
+        name_match = re.search(r'TOOL_NAME\s*=\s*["\']([^"\']+)["\']', code)
+        desc_match = re.search(r'TOOL_DESCRIPTION\s*=\s*["\']([^"\']+)["\']', code)
+        tool_name = name_match.group(1) if name_match else "unknown"
+        tool_desc = desc_match.group(1) if desc_match else description
+
+        return {
+            "ok": True,
+            "preview": True,
+            "name": tool_name,
+            "description": tool_desc,
+            "code": code,
+        }
+
+    except Exception as exc:
+        log.warning("Tool preview build failed: %s", exc)
+        return {"ok": False, "error": f"Failed to generate tool code: {exc}"}
+
+
 async def stream_ollama_response(path: str, body: dict, *, write_timeout: float):
     try:
         async with httpx.AsyncClient(
@@ -1366,6 +1771,19 @@ async def chat(request: Request):
     body = await request.json()
     client_host = request.client.host if request.client else "unknown"
     log.debug("Chat request from %s model=%s messages=%d", client_host, body.get("model", "?"), len(body.get("messages", [])))
+    memory_context = _get_memory_context()
+    if memory_context:
+        messages = body.get("messages", [])
+        has_system = any(m.get("role") == "system" for m in messages)
+        if has_system:
+            for m in messages:
+                if m.get("role") == "system":
+                    m["content"] = memory_context + "\n\n" + m["content"]
+                    break
+        else:
+            messages.insert(0, {"role": "system", "content": memory_context})
+        body["messages"] = messages
+
     project_id = body.pop("project_id", None)
     if project_id:
         knowledge_context = _get_project_knowledge_context(project_id)
@@ -1454,13 +1872,41 @@ async def pull_model(request: Request):
 
 @app.post("/api/generate-image")
 async def generate_image(request: Request):
-    """Proxy image generation requests to Ollama's /api/generate endpoint.
-    Supports streaming NDJSON with progress updates and a final base64 image."""
+    """Generate an image using a local Diffusers pipeline.
+    Streams NDJSON progress events to match the frontend contract."""
     body = _apply_image_generation_caps(await request.json())
-    return StreamingResponse(
-        stream_ollama_response("/api/generate", body, write_timeout=300.0),
-        media_type="application/x-ndjson",
-    )
+
+    async def _stream():
+        try:
+            # Check availability first
+            status = _image_gen.get_status()
+            if not status["available"]:
+                yield json.dumps({"error": status["error"]}) + "\n"
+                return
+
+            # Signal model loading if not yet loaded
+            if not status["model_loaded"]:
+                yield json.dumps({"status": "Loading image model…"}) + "\n"
+
+            yield json.dumps({"status": "Generating image…", "progress": 10}) + "\n"
+
+            b64_image = await _image_gen.generate_image(
+                prompt=body.get("prompt", ""),
+                width=body.get("width", 768),
+                height=body.get("height", 768),
+                steps=body.get("steps", 10),
+                negative_prompt=body.get("negative_prompt"),
+                seed=body.get("seed"),
+            )
+
+            yield json.dumps({"status": "Generating image…", "progress": 90}) + "\n"
+            yield json.dumps({"image": b64_image, "response": b64_image, "done": True}) + "\n"
+
+        except Exception as exc:
+            log.error("Image generation failed: %s", exc)
+            yield json.dumps({"error": str(exc)}) + "\n"
+
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")
 
 
 @app.post("/api/fetch-page")
@@ -1507,10 +1953,26 @@ _REGISTRY_FILE = PLUGINS_DIR / "registry.json"
 if not _REGISTRY_FILE.exists():
     _REGISTRY_FILE.write_text("[]", encoding="utf-8")
 
+MEMORY_DIR = Path.home() / "OfflineAI-Memory"
+MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+_MEMORY_FILE = MEMORY_DIR / "preferences.json"
+if not _MEMORY_FILE.exists():
+    _MEMORY_FILE.write_text("[]", encoding="utf-8")
+
 _TOOL_BLOCKED_PATTERNS = [
     "os.system", "subprocess", "eval(", "exec(", "__import__",
     "open(", "pathlib", "shutil", "glob",
     "compile(",
+    # Network access beyond httpx
+    "socket", "requests", "urllib.request", "http.client",
+    # Deserialization attacks
+    "pickle", "marshal",
+    # Native code access
+    "ctypes", "cffi",
+    # System manipulation
+    "sys.exit", "os.environ",
+    # Dynamic imports
+    "importlib",
 ]
 
 
@@ -1875,6 +2337,13 @@ async def research_project(project_id: str, request: Request):
 
             yield _sse_event({"type": "status", "message": "Writing comprehensive summary..."})
 
+            # Emit numbered source map so frontend can render clickable citation links
+            source_map = [
+                {"index": i, "title": s.get("title", "Unknown"), "url": s.get("url", "")}
+                for i, s in enumerate(all_sources[:15], 1)
+            ]
+            yield _sse_event({"type": "source_map", "sources": source_map})
+
             try:
                 summary = await _synthesize_summary(topic, findings_text, all_sources, model)
             except Exception as exc:
@@ -2015,7 +2484,9 @@ Format as a well-structured Markdown document with:
 - Organized sections with ## subheadings
 - Bullet points and numbered lists where appropriate
 - A conclusion or summary section
-- If relevant, include a references/sources section
+- A "## References" section at the end listing all cited sources as a numbered list
+
+If sources are provided above, use inline citation markers [1], [2], etc. to reference them. Place the citation immediately after the claim it supports. In the References section, list each cited source as: [N] Title — URL. Only cite sources from the provided list.
 
 Be thorough, detailed, and well-organized."""
 
@@ -2118,6 +2589,178 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{Path(file_path).stem}.pdf"'},
         )
+
+    return Response(
+        content=html.encode("utf-8"),
+        media_type="text/html",
+        headers={"Content-Disposition": f'attachment; filename="{Path(file_path).stem}.html"'},
+    )
+
+
+@app.post("/api/projects/{project_id}/export-docx")
+async def export_docx(project_id: str, request: Request):
+    """Convert a Markdown file to a DOCX document."""
+    body = await request.json()
+    file_path = (body.get("file_path") or "").strip()
+    if not file_path:
+        return JSONResponse({"error": "No file_path provided"}, status_code=400)
+
+    resolved = _resolve_project_path(project_id, file_path)
+    if resolved is None or not resolved.exists():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+
+    if not _DOCX_AVAILABLE:
+        return JSONResponse({"error": "python-docx is not installed"}, status_code=500)
+
+    md_content = resolved.read_text(encoding="utf-8")
+
+    def _build_docx(md_text: str) -> bytes:
+        doc = _docx_module.Document()
+
+        in_code_block = False
+        code_lines: list[str] = []
+
+        for line in md_text.split("\n"):
+            # --- fenced code block toggle ---
+            if line.strip().startswith("```"):
+                if in_code_block:
+                    # close code block
+                    code_text = "\n".join(code_lines)
+                    p = doc.add_paragraph()
+                    run = p.add_run(code_text)
+                    run.font.name = "Courier New"
+                    run.font.size = _docx_module.shared.Pt(9)
+                    p.style = doc.styles["Normal"]
+                    fmt = p.paragraph_format
+                    fmt.space_before = _docx_module.shared.Pt(4)
+                    fmt.space_after = _docx_module.shared.Pt(4)
+                    code_lines = []
+                    in_code_block = False
+                else:
+                    in_code_block = True
+                continue
+
+            if in_code_block:
+                code_lines.append(line)
+                continue
+
+            stripped = line.strip()
+
+            # --- blank lines ---
+            if not stripped:
+                continue
+
+            # --- headings ---
+            heading_match = re.match(r"^(#{1,6})\s+(.*)", line)
+            if heading_match:
+                level = min(len(heading_match.group(1)), 3)
+                doc.add_heading(heading_match.group(2).strip(), level=level)
+                continue
+
+            # --- bullet lists ---
+            bullet_match = re.match(r"^[\-\*]\s+(.*)", stripped)
+            if bullet_match:
+                doc.add_paragraph(bullet_match.group(1), style="List Bullet")
+                continue
+
+            # --- numbered lists ---
+            num_match = re.match(r"^\d+[\.\)]\s+(.*)", stripped)
+            if num_match:
+                doc.add_paragraph(num_match.group(1), style="List Number")
+                continue
+
+            # --- horizontal rule ---
+            if re.match(r"^[-*_]{3,}\s*$", stripped):
+                doc.add_paragraph("─" * 40)
+                continue
+
+            # --- blockquote ---
+            if stripped.startswith(">"):
+                text = re.sub(r"^>\s?", "", stripped)
+                p = doc.add_paragraph(text)
+                fmt = p.paragraph_format
+                fmt.left_indent = _docx_module.shared.Inches(0.5)
+                continue
+
+            # --- normal paragraph ---
+            doc.add_paragraph(stripped)
+
+        # flush any unclosed code block
+        if code_lines:
+            code_text = "\n".join(code_lines)
+            p = doc.add_paragraph()
+            run = p.add_run(code_text)
+            run.font.name = "Courier New"
+            run.font.size = _docx_module.shared.Pt(9)
+
+        buf = BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
+
+    docx_bytes = await asyncio.to_thread(_build_docx, md_content)
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{Path(file_path).stem}.docx"'},
+    )
+
+
+@app.post("/api/projects/{project_id}/export-html")
+async def export_html(project_id: str, request: Request):
+    """Convert a Markdown file to a standalone styled HTML document."""
+    body = await request.json()
+    file_path = (body.get("file_path") or "").strip()
+    if not file_path:
+        return JSONResponse({"error": "No file_path provided"}, status_code=400)
+
+    resolved = _resolve_project_path(project_id, file_path)
+    if resolved is None or not resolved.exists():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+
+    md_content = resolved.read_text(encoding="utf-8")
+
+    if _MARKDOWN_AVAILABLE:
+        html_body = _markdown_lib.markdown(md_content, extensions=["tables", "fenced_code", "toc", "nl2br"])
+    else:
+        html_body = f"<pre>{md_content}</pre>"
+
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{Path(file_path).stem}</title>
+<style>
+body {{ max-width: 860px; margin: 40px auto; padding: 0 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif; font-size: 16px; line-height: 1.7; color: #1a1a1a; background: #fff; }}
+h1 {{ font-size: 2em; border-bottom: 2px solid #333; padding-bottom: 8px; margin-top: 0; margin-bottom: 16px; }}
+h2 {{ font-size: 1.5em; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin-top: 32px; color: #2c3e50; }}
+h3 {{ font-size: 1.17em; margin-top: 24px; color: #34495e; }}
+p {{ margin: 10px 0; }}
+ul, ol {{ margin: 10px 0; padding-left: 28px; }}
+li {{ margin: 4px 0; }}
+code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; font-family: 'SF Mono', 'Fira Code', Menlo, monospace; }}
+pre {{ background: #f8f8f8; padding: 16px 20px; border-radius: 6px; overflow-x: auto; border: 1px solid #e8e8e8; font-size: 0.88em; line-height: 1.5; }}
+pre code {{ background: none; padding: 0; }}
+table {{ border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 0.95em; }}
+th, td {{ border: 1px solid #ddd; padding: 8px 12px; text-align: left; }}
+th {{ background: #f0f0f0; font-weight: 600; }}
+tr:nth-child(even) {{ background: #fafafa; }}
+blockquote {{ border-left: 4px solid #3498db; margin: 16px 0; padding: 10px 20px; color: #555; background: #f9fbfd; border-radius: 0 4px 4px 0; }}
+a {{ color: #2980b9; text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+hr {{ border: none; border-top: 1px solid #ddd; margin: 24px 0; }}
+img {{ max-width: 100%; height: auto; }}
+@media (prefers-color-scheme: dark) {{
+  body {{ background: #1a1a2e; color: #e0e0e0; }}
+  h1 {{ border-bottom-color: #555; }}
+  h2 {{ border-bottom-color: #444; color: #8ab4f8; }}
+  h3 {{ color: #8ab4f8; }}
+  code {{ background: #2a2a3e; }}
+  pre {{ background: #252540; border-color: #333; }}
+  th {{ background: #2a2a3e; }}
+  tr:nth-child(even) {{ background: #1f1f35; }}
+  td, th {{ border-color: #333; }}
+  blockquote {{ background: #1f1f35; border-left-color: #3498db; color: #aaa; }}
+  a {{ color: #5dade2; }}
+}}
+</style></head><body>{html_body}</body></html>"""
 
     return Response(
         content=html.encode("utf-8"),
@@ -2528,15 +3171,330 @@ async def toggle_tool(tool_name: str):
             return {"ok": True, "enabled": t["enabled"]}
     return JSONResponse({"error": "Tool not found"}, status_code=404)
 
+@app.post("/api/tools/{tool_name}/preview")
+async def preview_tool(tool_name: str):
+    """Return tool source, parameters, and sample invocation without executing."""
+    registry = _load_tool_registry()
+    tool = next((t for t in registry if t["name"] == tool_name), None)
+    if not tool:
+        return JSONResponse({"error": "Tool not found"}, status_code=404)
+    module_path = PLUGINS_DIR / tool["module"]
+    code = module_path.read_text(encoding="utf-8") if module_path.exists() else ""
+    sample_params = {}
+    for k, v in tool.get("parameters", {}).items():
+        if v.get("type") == "number":
+            sample_params[k] = 0
+        elif v.get("type") == "boolean":
+            sample_params[k] = True
+        else:
+            sample_params[k] = f"<{v.get('description', k)}>"
+    return {
+        "name": tool["name"],
+        "description": tool.get("description", ""),
+        "parameters": tool.get("parameters", {}),
+        "code": code,
+        "enabled": tool.get("enabled", True),
+        "sample_invocation": {
+            "endpoint": f"/api/tools/{tool_name}/execute",
+            "method": "POST",
+            "body": {"params": sample_params},
+        },
+    }
+
 @app.post("/api/tools/build")
 async def build_tool_endpoint(request: Request):
     body = await request.json()
     description = (body.get("description") or "").strip()
     model = body.get("model", FALLBACK_MODEL)
+    preview = body.get("preview", False)
     if not description:
         return JSONResponse({"error": "No description provided"}, status_code=400)
-    result = await _build_tool(description, model)
+    if preview:
+        result = await _build_tool_preview(description, model)
+    else:
+        result = await _build_tool(description, model)
     return result
+
+@app.get("/api/memory")
+async def get_memories():
+    return {"memories": _load_memories()}
+
+@app.post("/api/memory")
+async def add_memory_endpoint(request: Request):
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"error": "No memory text provided"}, status_code=400)
+    _add_memory(text)
+    return {"ok": True, "memories": _load_memories()}
+
+@app.delete("/api/memory/{index}")
+async def remove_memory_endpoint(index: int):
+    if _remove_memory(index):
+        return {"ok": True, "memories": _load_memories()}
+    return JSONResponse({"error": "Invalid index"}, status_code=404)
+
+@app.post("/api/suggest-followups")
+async def suggest_followups(request: Request):
+    """Generate follow-up question suggestions based on the conversation."""
+    body = await request.json()
+    model = body.get("model", FALLBACK_MODEL)
+    messages_list = body.get("messages", [])
+    if len(messages_list) < 2:
+        return {"suggestions": []}
+
+    last_exchange = messages_list[-2:]
+    context = "\n".join(f"{m['role']}: {m['content'][:300]}" for m in last_exchange)
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(f"{OLLAMA}/api/chat", json={
+                "model": model,
+                "messages": [{
+                    "role": "user",
+                    "content": f"Based on this conversation, suggest exactly 3 short follow-up questions the user might ask next. Return ONLY the questions, one per line, no numbering.\n\n{context}",
+                }],
+                "stream": False,
+                "options": {"temperature": 0.7, "num_predict": 128},
+            })
+            data = resp.json()
+            content = data.get("message", {}).get("content", "")
+            suggestions = [q.strip().strip('"').strip("'") for q in content.strip().split("\n") if q.strip()]
+            suggestions = [re.sub(r'^[\d]+[.)\s]+|^[-*]\s+', '', s).strip() for s in suggestions]
+            return {"suggestions": suggestions[:3]}
+    except Exception:
+        return {"suggestions": []}
+
+
+# ── Data Portability (Export / Import Archive) ──────────────────────────
+
+import zipfile as _zipfile
+
+
+def _add_dir_to_zip(zf: _zipfile.ZipFile, directory: Path, archive_prefix: str) -> int:
+    """Recursively add a directory to a zip file. Returns number of files added."""
+    count = 0
+    if not directory.is_dir():
+        return count
+    for fp in sorted(directory.rglob("*")):
+        if fp.is_file():
+            arcname = f"{archive_prefix}/{fp.relative_to(directory)}"
+            zf.write(fp, arcname)
+            count += 1
+    return count
+
+
+@app.get("/api/export-archive")
+async def export_archive(request: Request):
+    """Create a ZIP archive of all user data for portability."""
+    if not _runtime_control_allowed(request):
+        return JSONResponse(
+            {"error": "Export requires localhost access or a valid LAN token."},
+            status_code=403,
+        )
+
+    def _build_archive() -> str:
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        tmp.close()
+        with _zipfile.ZipFile(tmp.name, "w", _zipfile.ZIP_DEFLATED) as zf:
+            # Projects
+            projects_count = _add_dir_to_zip(zf, PROJECTS_DIR, "projects")
+
+            # Plugins
+            plugins_count = _add_dir_to_zip(zf, PLUGINS_DIR, "plugins")
+
+            # Memory
+            memory_count = _add_dir_to_zip(zf, MEMORY_DIR, "memory")
+
+            # Token stats
+            token_stats_count = 0
+            if _TOKEN_STATS_FILE.exists():
+                zf.write(_TOKEN_STATS_FILE, "token_stats.json")
+                token_stats_count = 1
+
+            # Manifest
+            manifest = {
+                "version": "1.0",
+                "app": "OfflineAI",
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "platform": platform.system(),
+                "contents": {
+                    "projects_files": projects_count,
+                    "plugins_files": plugins_count,
+                    "memory_files": memory_count,
+                    "token_stats": token_stats_count > 0,
+                },
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+        return tmp.name
+
+    zip_path = await asyncio.to_thread(_build_archive)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"OfflineAI-backup-{timestamp}.zip"
+
+    async def _stream_and_cleanup():
+        try:
+            with open(zip_path, "rb") as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            Path(zip_path).unlink(missing_ok=True)
+
+    return StreamingResponse(
+        _stream_and_cleanup(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/import-archive")
+async def import_archive(request: Request, file: UploadFile = File(...)):
+    """Import a ZIP archive, merging data without overwriting existing entries."""
+    if not _runtime_control_allowed(request):
+        return JSONResponse(
+            {"error": "Import requires localhost access or a valid LAN token."},
+            status_code=403,
+        )
+
+    content = await file.read()
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp.write(content)
+    tmp.close()
+
+    def _do_import() -> dict:
+        summary: dict = {
+            "projects_imported": 0,
+            "projects_skipped": 0,
+            "plugins_imported": 0,
+            "memory_merged": 0,
+            "token_stats_merged": False,
+            "errors": [],
+        }
+        try:
+            with _zipfile.ZipFile(tmp.name, "r") as zf:
+                # Validate manifest
+                if "manifest.json" not in zf.namelist():
+                    summary["errors"].append("Missing manifest.json — not a valid OfflineAI archive.")
+                    return summary
+                try:
+                    manifest = json.loads(zf.read("manifest.json"))
+                    if manifest.get("app") != "OfflineAI":
+                        summary["errors"].append("Archive is not from OfflineAI.")
+                        return summary
+                except (json.JSONDecodeError, KeyError) as exc:
+                    summary["errors"].append(f"Invalid manifest: {exc}")
+                    return summary
+
+                names = zf.namelist()
+
+                # Import projects (merge, don't overwrite)
+                for name in names:
+                    if name.startswith("projects/") and not name.endswith("/"):
+                        rel = name[len("projects/"):]
+                        target = PROJECTS_DIR / rel
+                        # Security: prevent path traversal
+                        try:
+                            target.resolve().relative_to(PROJECTS_DIR.resolve())
+                        except ValueError:
+                            continue
+                        if target.exists():
+                            # Check if this is a new project directory
+                            parts = Path(rel).parts
+                            if len(parts) >= 1:
+                                project_dir = PROJECTS_DIR / parts[0]
+                                if project_dir.exists():
+                                    summary["projects_skipped"] += 1
+                                    continue
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(zf.read(name))
+                        summary["projects_imported"] += 1
+
+                # Import plugins (merge registry)
+                for name in names:
+                    if name.startswith("plugins/") and not name.endswith("/"):
+                        rel = name[len("plugins/"):]
+                        target = PLUGINS_DIR / rel
+                        try:
+                            target.resolve().relative_to(PLUGINS_DIR.resolve())
+                        except ValueError:
+                            continue
+                        if rel == "registry.json":
+                            # Merge registries
+                            try:
+                                incoming_reg = json.loads(zf.read(name))
+                                existing_reg = _load_tool_registry()
+                                existing_names = {t["name"] for t in existing_reg}
+                                added = 0
+                                for tool in incoming_reg:
+                                    if tool.get("name") and tool["name"] not in existing_names:
+                                        existing_reg.append(tool)
+                                        added += 1
+                                _save_tool_registry(existing_reg)
+                                summary["plugins_imported"] += added
+                            except Exception as exc:
+                                summary["errors"].append(f"Plugin registry merge error: {exc}")
+                        else:
+                            # Copy tool module files if not existing
+                            if not target.exists():
+                                target.parent.mkdir(parents=True, exist_ok=True)
+                                target.write_bytes(zf.read(name))
+
+                # Import memory (merge)
+                for name in names:
+                    if name.startswith("memory/") and not name.endswith("/"):
+                        rel = name[len("memory/"):]
+                        if rel == "preferences.json":
+                            try:
+                                incoming_mems = json.loads(zf.read(name))
+                                existing_mems = _load_memories()
+                                existing_set = set(existing_mems)
+                                added = 0
+                                for m in incoming_mems:
+                                    if isinstance(m, str) and m.strip() and m not in existing_set:
+                                        existing_mems.append(m)
+                                        existing_set.add(m)
+                                        added += 1
+                                _save_memories(existing_mems)
+                                summary["memory_merged"] = added
+                            except Exception as exc:
+                                summary["errors"].append(f"Memory merge error: {exc}")
+                        else:
+                            target = MEMORY_DIR / rel
+                            try:
+                                target.resolve().relative_to(MEMORY_DIR.resolve())
+                            except ValueError:
+                                continue
+                            if not target.exists():
+                                target.parent.mkdir(parents=True, exist_ok=True)
+                                target.write_bytes(zf.read(name))
+
+                # Import token stats (merge)
+                if "token_stats.json" in names:
+                    try:
+                        incoming_stats = json.loads(zf.read("token_stats.json"))
+                        global _token_stats
+                        for model_key, counts in incoming_stats.items():
+                            if isinstance(counts, list) and len(counts) == 2:
+                                if model_key in _token_stats:
+                                    _token_stats[model_key][0] += counts[0]
+                                    _token_stats[model_key][1] += counts[1]
+                                else:
+                                    _token_stats[model_key] = list(counts)
+                        _save_token_stats()
+                        summary["token_stats_merged"] = True
+                    except Exception as exc:
+                        summary["errors"].append(f"Token stats merge error: {exc}")
+        finally:
+            Path(tmp.name).unlink(missing_ok=True)
+
+        return summary
+
+    result = await asyncio.to_thread(_do_import)
+    has_errors = bool(result.get("errors"))
+    return JSONResponse(result, status_code=207 if has_errors else 200)
 
 
 if __name__ == "__main__":

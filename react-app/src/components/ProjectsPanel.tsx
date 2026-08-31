@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import type { Project } from '../types';
+import type { CreationTemplate } from '../constants';
+import { CREATION_TEMPLATES } from '../constants';
 import { ProjectFileBrowser } from './ProjectFileBrowser';
 
 export function ProjectsPanel() {
@@ -12,6 +14,7 @@ export function ProjectsPanel() {
     createNewProject,
     removeProject,
     openProject,
+    sendMessage,
   } = useApp();
 
   const [search, setSearch] = useState('');
@@ -19,6 +22,7 @@ export function ProjectsPanel() {
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [creating, setCreating] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<CreationTemplate | null>(null);
 
   const filtered = search
     ? projects.filter((p) =>
@@ -26,15 +30,33 @@ export function ProjectsPanel() {
       )
     : projects;
 
+  const handleSelectTemplate = useCallback((template: CreationTemplate) => {
+    setSelectedTemplate(template);
+    if (!newName.trim()) {
+      setNewName(template.name);
+    }
+    setShowCreate(true);
+  }, [newName]);
+
   const handleCreate = useCallback(async () => {
     if (!newName.trim()) return;
     setCreating(true);
-    await createNewProject(newName.trim(), newDesc.trim());
+    const project = await createNewProject(newName.trim(), newDesc.trim());
+    const template = selectedTemplate;
     setNewName('');
     setNewDesc('');
     setShowCreate(false);
+    setSelectedTemplate(null);
     setCreating(false);
-  }, [newName, newDesc, createNewProject]);
+    if (project && template) {
+      const workflowCmd = `/workflow ${template.workflow.replace(/\{topic\}/g, newName.trim())}`;
+      closeProjectsPanel();
+      // Allow state to settle before sending the workflow command
+      setTimeout(() => {
+        sendMessage(workflowCmd);
+      }, 300);
+    }
+  }, [newName, newDesc, createNewProject, selectedTemplate, closeProjectsPanel, sendMessage]);
 
   return (
     <>
@@ -96,7 +118,7 @@ export function ProjectsPanel() {
               className="w-full bg-transparent border border-border rounded-sm text-text-primary text-[13px] px-2.5 py-1.5 outline-none focus:border-border-hi"
               maxLength={64}
               autoFocus
-              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setShowCreate(false); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') { setShowCreate(false); setSelectedTemplate(null); } }}
             />
             <input
               type="text"
@@ -105,22 +127,60 @@ export function ProjectsPanel() {
               onChange={(e) => setNewDesc(e.target.value)}
               className="w-full bg-transparent border border-border rounded-sm text-text-primary text-[13px] px-2.5 py-1.5 outline-none focus:border-border-hi"
               maxLength={200}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setShowCreate(false); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') { setShowCreate(false); setSelectedTemplate(null); } }}
             />
+            {selectedTemplate && (
+              <div className="flex items-center gap-2 px-2 py-1.5 bg-accent-lo/30 border border-accent-b rounded-sm">
+                <span className="text-[14px]">{selectedTemplate.icon}</span>
+                <span className="text-[12px] text-accent font-medium flex-1 truncate">{selectedTemplate.name} template</span>
+                <button
+                  className="text-[11px] text-text-dim hover:text-text-primary"
+                  onClick={() => setSelectedTemplate(null)}
+                  aria-label="Remove template"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
             <div className="flex gap-2">
               <button
                 className="flex-1 py-1.5 bg-accent text-[#07080f] text-[12px] font-semibold rounded-sm disabled:opacity-50"
                 onClick={handleCreate}
                 disabled={!newName.trim() || creating}
               >
-                {creating ? 'Creating…' : 'Create'}
+                {creating ? 'Creating…' : selectedTemplate ? `Create & Run ${selectedTemplate.name}` : 'Create'}
               </button>
               <button
                 className="flex-1 py-1.5 bg-surface-md border border-border text-text-muted text-[12px] rounded-sm"
-                onClick={() => setShowCreate(false)}
+                onClick={() => { setShowCreate(false); setSelectedTemplate(null); }}
               >
                 Cancel
               </button>
+            </div>
+
+            {/* Template cards */}
+            <div className="pt-1">
+              <div className="text-[11px] text-text-dim font-medium mb-1.5">Or start from a template:</div>
+              <div className="flex flex-col gap-1.5">
+                {CREATION_TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    className={`flex items-start gap-2 px-2.5 py-2 rounded-[7px] border text-left transition-colors cursor-pointer ${
+                      selectedTemplate?.id === tpl.id
+                        ? 'bg-accent-lo border-accent-b'
+                        : 'bg-surface border-border hover:bg-surface-md hover:border-border-hi'
+                    }`}
+                    onClick={() => handleSelectTemplate(tpl)}
+                    aria-label={`Use ${tpl.name} template`}
+                  >
+                    <span className="text-[16px] mt-0.5 shrink-0">{tpl.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] font-medium text-text-primary truncate">{tpl.name}</div>
+                      <div className="text-[11px] text-text-dim leading-tight">{tpl.description}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}

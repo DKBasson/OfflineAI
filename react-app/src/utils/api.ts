@@ -613,3 +613,131 @@ export async function buildToolApi(
     return { ok: false, error: 'Request failed' };
   }
 }
+
+export async function fetchMemories(): Promise<string[]> {
+  try {
+    const r = await fetch('/api/memory', { headers: authHeaders() });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return (data as { memories: string[] }).memories || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addMemoryApi(text: string): Promise<boolean> {
+  try {
+    const r = await fetch('/api/memory', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ text }),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function removeMemoryApi(index: number): Promise<boolean> {
+  try {
+    const r = await fetch(`/api/memory/${index}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchFollowups(model: string, messages: Array<{role: string; content: string}>): Promise<string[]> {
+  try {
+    const r = await fetch('/api/suggest-followups', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ model, messages: messages.slice(-4) }),
+    });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return (data as { suggestions: string[] }).suggestions || [];
+  } catch {
+    return [];
+  }
+}
+
+// ── Health Dashboard ──────────────────────────────────────────────
+
+export interface HealthData {
+  ollama: { status: string; version: string | null; models_count: number };
+  system: {
+    platform: string;
+    python: string;
+    ram_total_gb: number;
+    ram_available_gb: number;
+    disk_free_gb: number;
+  };
+  services: Record<string, { available: boolean; model?: string; reason?: string }>;
+  projects: { count: number; disk_usage_mb: number };
+  tools: { count: number; enabled: number; disabled: number };
+  memory: { count: number };
+  uptime_seconds: number;
+}
+
+export async function fetchHealth(): Promise<HealthData | null> {
+  try {
+    const r = await fetch('/api/health', { headers: authHeaders() });
+    if (!r.ok) return null;
+    return (await r.json()) as HealthData;
+  } catch {
+    return null;
+  }
+}
+
+// ── Data Portability ──────────────────────────────────────────────
+
+export async function downloadExportArchive(): Promise<boolean> {
+  try {
+    const r = await fetch('/api/export-archive', { headers: authHeaders() });
+    if (!r.ok) return false;
+    const blob = await r.blob();
+    const disposition = r.headers.get('content-disposition') || '';
+    const match = disposition.match(/filename="?(.+?)"?$/);
+    const filename = match ? match[1] : 'OfflineAI-backup.zip';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface ImportResult {
+  projects_imported: number;
+  projects_skipped: number;
+  plugins_imported: number;
+  memory_merged: number;
+  token_stats_merged: boolean;
+  errors: string[];
+}
+
+export async function uploadImportArchive(file: File): Promise<ImportResult | null> {
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const r = await fetch('/api/import-archive', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: form,
+    });
+    if (!r.ok && r.status !== 207) return null;
+    return (await r.json()) as ImportResult;
+  } catch {
+    return null;
+  }
+}
